@@ -1,0 +1,36 @@
+# Toolchain, environment and task root for the Talos labs. Run `mise install` once.
+# Each stage folder (NN-*) has its own mise.toml with CLUSTER, SUBNET, TALOSCONFIG, KUBECONFIG
+# and the tasks up/check/down.
+min_version = "2026.10.0"
+monorepo_root = true
+
+[monorepo]
+config_roots = ["0*"]
+
+[tools]
+talosctl = "latest"
+kubectl = "latest"
+helm = "latest"
+cilium-cli = "latest"
+jq = "latest"
+yq = "latest"
+
+[env]
+LAB_ROOT = "{{config_root}}"   # stage tasks source $LAB_ROOT/lib/lab.sh
+
+[tasks.preflight]
+description = "Check the docker daemon and the Talos version (1.14 or later)"
+hide = true
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; docker info >/dev/null; check_talos_version"
+
+[tasks.preflight-qemu]
+description = "Check KVM, QEMU and the Talos version, then ask for the sudo password"
+hide = true
+raw = true
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; check_qemu; check_talos_version; sudo -v"
+
+[tasks.down-all]
+description = "Tear down every stage, one at a time"
+run = "mise run --jobs 1 '//...:down'"

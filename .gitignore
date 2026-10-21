@@ -1,0 +1,3 @@
+# generated per stage: talosconfig, kubeconfig, cluster state, rendered files
+build/
+mise.local.toml
