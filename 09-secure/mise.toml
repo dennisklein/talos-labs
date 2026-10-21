@@ -1,0 +1,25 @@
+[env]
+CLUSTER = "secure"
+SUBNET = "10.5.9.0/24"
+TALOSCONFIG = "{{config_root}}/build/talosconfig"
+KUBECONFIG = "{{config_root}}/build/kubeconfig"
+
+[tasks.up]
+description = "QEMU cluster with UEFI Secure Boot, a TPM 2.0 and TPM-encrypted STATE and EPHEMERAL"
+depends = ["//:preflight-qemu"]
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_up_qemu --workers 1 --presets iso-secureboot; mise run check"
+
+[tasks.check]
+description = "Show the Secure Boot state and the encryption of the system volumes"
+run = [
+  "talosctl health --wait-timeout 10m",
+  "talosctl -n 10.5.9.2,10.5.9.3 get securitystate",
+  "talosctl -n 10.5.9.2,10.5.9.3 get volumestatuses | grep -E 'NODE|STATE|EPHEMERAL'",
+  "kubectl get nodes -o wide",
+]
+
+[tasks.down]
+description = "Destroy the VMs"
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_down_qemu"

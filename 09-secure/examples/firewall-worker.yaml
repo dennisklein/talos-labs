@@ -1,0 +1,33 @@
+# Ingress firewall for the worker: block all; apid, kubelet and Flannel VXLAN only from the
+# cluster network. The kubelet rule excludes the host (10.5.9.1): only the nodes can reach it.
+apiVersion: v1alpha1
+kind: NetworkDefaultActionConfig
+ingress: block
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: apid-ingress
+portSelector:
+  ports: [50000]
+  protocol: tcp
+ingress:
+  - subnet: 10.5.9.0/24
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: kubelet-ingress
+portSelector:
+  ports: [10250]
+  protocol: tcp
+ingress:
+  - subnet: 10.5.9.0/24
+    except: 10.5.9.1/32
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: cni-vxlan
+portSelector:
+  ports: [4789]
+  protocol: udp
+ingress:
+  - subnet: 10.5.9.0/24

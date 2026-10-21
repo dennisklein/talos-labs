@@ -1,0 +1,60 @@
+# Ingress firewall for the control plane node: block all, then allow the Talos and Kubernetes
+# services. apid and the Kubernetes API are open; kubelet, trustd and Flannel VXLAN only from
+# the cluster network; etcd only from the control plane node.
+apiVersion: v1alpha1
+kind: NetworkDefaultActionConfig
+ingress: block
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: apid-ingress
+portSelector:
+  ports: [50000]
+  protocol: tcp
+ingress:
+  - subnet: 0.0.0.0/0
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: kubernetes-api-ingress
+portSelector:
+  ports: [6443]
+  protocol: tcp
+ingress:
+  - subnet: 0.0.0.0/0
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: trustd-ingress
+portSelector:
+  ports: [50001]
+  protocol: tcp
+ingress:
+  - subnet: 10.5.9.0/24
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: kubelet-ingress
+portSelector:
+  ports: [10250]
+  protocol: tcp
+ingress:
+  - subnet: 10.5.9.0/24
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: etcd-ingress
+portSelector:
+  ports: [2379-2380]
+  protocol: tcp
+ingress:
+  - subnet: 10.5.9.2/32
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: cni-vxlan
+portSelector:
+  ports: [4789]
+  protocol: udp
+ingress:
+  - subnet: 10.5.9.0/24

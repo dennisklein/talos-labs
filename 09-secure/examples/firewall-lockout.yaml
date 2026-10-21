@@ -1,0 +1,15 @@
+# A rule that looks right: apid only from the host (10.5.9.1). But talosctl sends the request to its
+# endpoint (the control plane node, 10.5.9.2), and apid there forwards it to the worker. The worker
+# now blocks the forwarded request. Apply it only in try mode.
+apiVersion: v1alpha1
+kind: NetworkDefaultActionConfig
+ingress: block
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: apid-ingress
+portSelector:
+  ports: [50000]
+  protocol: tcp
+ingress:
+  - subnet: 10.5.9.1/32
