@@ -129,6 +129,7 @@ Other useful commands:
 | UEFI firmware | `ovmf` | `edk2-ovmf` | Stage 09 needs the Secure Boot variant (`OVMF_CODE*.secboot.fd`). |
 | Software TPM | `swtpm swtpm-tools` | `swtpm swtpm-tools` | Stage 09. |
 | iptables | `iptables` | `iptables` | The CNI plugins of the provisioner use it. |
+| firewalld | | | If firewalld is active, it rejects DHCP from the VMs on the new bridge. The `up` tasks put the bridge into the zone `trusted` (runtime only, until the next reload). |
 | sudo | | | `talosctl cluster create qemu` runs as root. The `up` and `down` tasks ask for the `sudo` password. |
 | `socat`, `nc`, `openssl`, `curl` | `socat netcat-openbsd openssl curl` | `socat nmap-ncat openssl curl` | Experiments in stages 06, 07 and 09. |
 | Memory | | | 2 GiB per VM. Stage 07 needs 8 GiB free. |

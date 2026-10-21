@@ -82,13 +82,30 @@ sudo_talosctl() {
   sudo --preserve-env=HOME,TALOSCONFIG,KUBECONFIG "$(command -v talosctl)" "$@"
 }
 
+# firewalld puts an unknown interface into the default zone, which rejects DHCP (UDP 67) from the
+# VMs. Wait for the bridge of the cluster (the interface with the gateway address) and put it into
+# the zone "trusted", for this boot only. Without firewalld, do nothing.
+firewalld_trust_bridge() {
+  systemctl is-active --quiet firewalld 2>/dev/null || return 0
+  local gw="${SUBNET%.*}.1/" br="" i
+  for i in $(seq 300); do
+    br="$(ip -br addr | awk -v gw="$gw" 'index($3, gw) == 1 {print $1}')"
+    [ -n "$br" ] && break
+    sleep 1
+  done
+  [ -n "$br" ] || { echo "firewalld: no bridge with ${gw%/} after ${i}s" >&2; return 0; }
+  sudo firewall-cmd --zone=trusted --add-interface="$br" >/dev/null && echo "firewalld: $br is in the zone trusted"
+}
+
 talos_up_qemu() {  # extra flags (--workers, --controlplanes, --disks, --presets, ...) are passed through
   local patches
   mapfile -t patches < <(patch_flags)
   fresh_configs
+  firewalld_trust_bridge &
   sudo_talosctl cluster create qemu --name "$CLUSTER" --cidr "$SUBNET" --state "$(state_dir)" \
     --talosconfig-destination "$TALOSCONFIG" --talos-version "$(talos_version)" \
     "${patches[@]}" "$@"
+  wait
   own_configs
   talosctl config node "$(node_ip 1)"
 }
