@@ -1,0 +1,9 @@
+# User volume "scratch" on the system disk, in the space after EPHEMERAL.
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: scratch
+provisioning:
+  diskSelector:
+    match: system_disk
+  minSize: 1GiB
+  maxSize: 2GiB

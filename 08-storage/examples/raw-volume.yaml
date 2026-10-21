@@ -1,0 +1,10 @@
+# Raw volume "raw-data": a partition of 1 GiB on /dev/vdc without a file system and without a mount.
+# The partition label is r-raw-data. Use it for software that wants a block device.
+apiVersion: v1alpha1
+kind: RawVolumeConfig
+name: raw-data
+provisioning:
+  diskSelector:
+    match: disk.dev_path == "/dev/vdc"
+  minSize: 1GiB
+  maxSize: 1GiB

@@ -1,0 +1,6 @@
+# Remove the user volume "local-data" from the configuration. Talos unmounts it.
+# The partition and its data stay on the disk.
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: local-data
+$patch: delete

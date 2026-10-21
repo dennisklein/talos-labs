@@ -1,0 +1,6 @@
+# User volume "cache" as a directory on EPHEMERAL: no partition, no size limit,
+# mounted at /var/mnt/cache.
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: cache
+volumeType: directory

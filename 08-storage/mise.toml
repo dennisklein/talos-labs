@@ -1,0 +1,25 @@
+[env]
+CLUSTER = "storage"
+SUBNET = "10.5.8.0/24"
+TALOSCONFIG = "{{config_root}}/build/talosconfig"
+KUBECONFIG = "{{config_root}}/build/kubeconfig"
+
+[tasks.up]
+description = "QEMU cluster with two workers; each worker has two extra disks and a smaller EPHEMERAL"
+depends = ["//:preflight-qemu"]
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_up_qemu --workers 2 --disks virtio:10GiB,virtio:6GiB,virtio:4GiB; mise run check"
+
+[tasks.check]
+description = "Show the disks and the volumes of the first worker"
+run = [
+  "talosctl health --wait-timeout 10m",
+  "talosctl -n 10.5.8.3 get disks",
+  "talosctl -n 10.5.8.3 get volumestatuses",
+  "kubectl get nodes -o wide",
+]
+
+[tasks.down]
+description = "Destroy the VMs"
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_down_qemu"

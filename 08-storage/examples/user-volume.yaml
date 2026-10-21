@@ -1,0 +1,12 @@
+# User volume "local-data": an XFS partition of 1 to 3 GiB on the disk /dev/vdb.
+# Talos makes the partition (label u-local-data) and mounts it at /var/mnt/local-data.
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: local-data
+provisioning:
+  diskSelector:
+    match: disk.dev_path == "/dev/vdb"
+  minSize: 1GiB
+  maxSize: 3GiB
+filesystem:
+  type: xfs

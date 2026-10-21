@@ -1,0 +1,7 @@
+# Limit EPHEMERAL (/var) on the workers to 5 GiB. The rest of the system disk stays free for user
+# volumes. Talos applies the size only when it makes the partition (at the install).
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+provisioning:
+  maxSize: 5GiB

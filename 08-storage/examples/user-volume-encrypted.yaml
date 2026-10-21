@@ -1,0 +1,17 @@
+# User volume "secret": a LUKS2-encrypted partition on /dev/vdb. The key comes from the node ID
+# (unique per machine). lockToState binds the volume to the STATE partition: after a reset or on
+# a different machine, Talos cannot open it.
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: secret
+provisioning:
+  diskSelector:
+    match: disk.dev_path == "/dev/vdb"
+  minSize: 1GiB
+  maxSize: 1GiB
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      nodeID: {}
+      lockToState: true
