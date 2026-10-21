@@ -1,0 +1,6 @@
+# Strategic merge patch: a document with the same kind (and name) is merged into the machine config.
+# The map "labels" is merged key by key.
+apiVersion: v1alpha1
+kind: KubeNodeConfig
+labels:
+  lab.example.com/tier: blue

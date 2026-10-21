@@ -1,0 +1,4 @@
+# JSON patch (RFC 6902): operations with a path. JSON patches apply only to the v1alpha1 document.
+- op: add
+  path: /machine/certSANs/-
+  value: talos.lab.example.com

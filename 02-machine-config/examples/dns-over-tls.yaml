@@ -1,0 +1,7 @@
+# DNS over TLS to Quad9. Apply it with --mode=try: Talos reverts it after the timeout.
+apiVersion: v1alpha1
+kind: ResolverConfig
+nameservers:
+  - address: 9.9.9.9
+    protocol: DoT
+    tlsServerName: dns.quad9.net

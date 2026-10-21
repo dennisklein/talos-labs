@@ -1,0 +1,24 @@
+[env]
+CLUSTER = "config"
+SUBNET = "10.5.2.0/24"
+TALOSCONFIG = "{{config_root}}/build/talosconfig"
+KUBECONFIG = "{{config_root}}/build/kubeconfig"
+
+[tasks.up]
+description = "Talos in Docker with one control plane node and one worker, to change the machine config"
+depends = ["//:preflight"]
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_up_docker --workers 1; mise run check"
+
+[tasks.check]
+description = "Check the health and show the configuration documents of each node"
+run = [
+  "talosctl health --wait-timeout 5m",
+  "talosctl -n 10.5.2.2,10.5.2.3 get machineconfig",
+  "kubectl get nodes --show-labels",
+]
+
+[tasks.down]
+description = "Destroy the cluster"
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_down_docker"

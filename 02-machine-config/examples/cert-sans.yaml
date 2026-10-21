@@ -1,0 +1,4 @@
+# Strategic merge patch for the v1alpha1 document (it has no kind): lists are appended.
+machine:
+  certSANs:
+    - talos.lab.example.com

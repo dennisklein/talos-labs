@@ -1,0 +1,5 @@
+# Delete a complete document. Talos removes the file.
+apiVersion: v1alpha1
+kind: EtcFileConfig
+name: lab/motd.conf
+$patch: delete

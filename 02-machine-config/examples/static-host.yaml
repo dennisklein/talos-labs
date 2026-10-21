@@ -1,0 +1,6 @@
+# New document: it is added to the machine config. Talos writes the entry to /etc/hosts.
+apiVersion: v1alpha1
+kind: StaticHostConfig
+name: 10.5.2.200
+hostnames:
+  - registry.lab.example.com

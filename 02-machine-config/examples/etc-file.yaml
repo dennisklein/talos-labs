@@ -1,0 +1,7 @@
+# User-owned file under /etc. The name is the path relative to /etc.
+apiVersion: v1alpha1
+kind: EtcFileConfig
+name: lab/motd.conf
+mode: 0o644
+contents: |
+  message = "configured by a machine config document"
