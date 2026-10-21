@@ -1,0 +1,19 @@
+[env]
+CLUSTER = "upgrade"
+SUBNET = "10.5.6.0/24"
+TALOSCONFIG = "{{config_root}}/build/talosconfig"
+KUBECONFIG = "{{config_root}}/build/kubeconfig"
+
+[tasks.check]
+description = "Show the Talos version, the extensions and the Kubernetes version of each node"
+run = [
+  "talosctl health --wait-timeout 10m",
+  "talosctl -n 10.5.6.2,10.5.6.3 version --short",
+  "talosctl -n 10.5.6.2,10.5.6.3 get extensions",
+  "kubectl get nodes -o wide",
+]
+
+[tasks.down]
+description = "Destroy the VMs"
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_down_qemu"

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="QEMU cluster one Talos patch release and one Kubernetes minor release behind"
+#MISE depends=["//:preflight-qemu"]
+source "$LAB_ROOT/lib/lab.sh"
+
+# Start one step behind, so that there is something to upgrade: the patch release before the
+# Talos version of the labs (the same version for a .0 release), and the latest patch release
+# of the Kubernetes minor release before the default of talosctl.
+from="$(talos_previous_version)"
+k8s="$(k8s_previous_version)"
+echo "Talos $from, Kubernetes $k8s"
+TALOS_VERSION="$from" talos_up_qemu --workers 1 --kubernetes-version "$k8s"
+mise run check

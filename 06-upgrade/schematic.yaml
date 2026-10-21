@@ -1,0 +1,6 @@
+# Image Factory schematic with one official system extension. The Image Factory computes the
+# schematic ID from the content (comments do not count): the same content gives the same ID.
+customization:
+  systemExtensions:
+    officialExtensions:
+      - siderolabs/qemu-guest-agent
