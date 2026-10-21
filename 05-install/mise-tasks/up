@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#MISE description="QEMU VMs that boot the Talos ISO and stay in maintenance mode (no machine configuration)"
+#MISE depends=["//:preflight-qemu"]
+source "$LAB_ROOT/lib/lab.sh"
+
+# The maintenance preset skips the machine configuration: the VMs boot the ISO and wait for a
+# configuration on the maintenance API. talosctl writes the configuration that it would apply
+# (controlplane.yaml, worker.yaml) to the working directory and its talosconfig to TALOSCONFIG.
+# Keep both in build/provisioner for comparison. Steps 2 to 7 of the README make new ones.
+talos_up_qemu --workers 1 --presets iso,maintenance
+ref="$(build_dir)/provisioner"
+mkdir -p "$ref"
+sudo mv controlplane.yaml worker.yaml "$ref/"
+sudo chown -R "$(id -u):$(id -g)" "$ref"
+mv "$TALOSCONFIG" "$ref/talosconfig"
+
+echo
+echo "The VMs are in maintenance mode. Continue with step 2 of the README, or run 'mise run install'."

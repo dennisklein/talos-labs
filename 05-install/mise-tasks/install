@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Steps 3 to 7 of the README in one command: generate, apply, bootstrap, kubeconfig"
+source "$LAB_ROOT/lib/lab.sh"
+
+cp_ip="$(node_ip 1)"
+worker_ip="$(node_ip 2)"
+gen="$(build_dir)"
+
+[ -e "$gen/secrets.yaml" ] || talosctl gen secrets -o "$gen/secrets.yaml"
+talosctl gen config "$CLUSTER" "https://$cp_ip:6443" --with-secrets "$gen/secrets.yaml" \
+  --install-disk /dev/vda --with-docs=false --with-examples=false --output "$gen" --force
+talosctl config endpoint "$cp_ip"
+talosctl config node "$cp_ip"
+
+talosctl apply-config --insecure -n "$cp_ip" -f "$gen/controlplane.yaml" -p @node-patches/controlplane-1.yaml
+talosctl apply-config --insecure -n "$worker_ip" -f "$gen/worker.yaml" -p @node-patches/worker-1.yaml
+
+# The nodes install Talos to /dev/vda and reboot. Wait for the authenticated API.
+until talosctl -n "$cp_ip" version >/dev/null 2>&1; do sleep 5; done
+talosctl bootstrap
+rm -f "$KUBECONFIG"
+talosctl kubeconfig "$KUBECONFIG"
+mise run check

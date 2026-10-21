@@ -1,0 +1,17 @@
+[env]
+CLUSTER = "install"
+SUBNET = "10.5.5.0/24"
+TALOSCONFIG = "{{config_root}}/build/talosconfig"
+KUBECONFIG = "{{config_root}}/build/kubeconfig"
+
+[tasks.check]
+description = "Check the health of Talos and Kubernetes"
+run = [
+  "talosctl health --wait-timeout 10m",
+  "kubectl get nodes -o wide",
+]
+
+[tasks.down]
+description = "Destroy the VMs"
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_down_qemu"

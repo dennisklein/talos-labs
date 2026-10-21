@@ -1,0 +1,6 @@
+# Fixed host name for the first control plane node. The generated configuration has
+# "auto: stable" (a host name made from the machine ID); "auto" and "hostname" are exclusive.
+apiVersion: v1alpha1
+kind: HostnameConfig
+auto: off
+hostname: install-controlplane-1
