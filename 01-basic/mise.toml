@@ -1,0 +1,23 @@
+[env]
+CLUSTER = "basic"
+SUBNET = "10.5.1.0/24"
+TALOSCONFIG = "{{config_root}}/build/talosconfig"
+KUBECONFIG = "{{config_root}}/build/kubeconfig"
+
+[tasks.up]
+description = "Talos in Docker: one control plane node, two workers"
+depends = ["//:preflight"]
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_up_docker --workers 2; mise run check"
+
+[tasks.check]
+description = "Check the health of Talos and Kubernetes"
+run = [
+  "talosctl health --wait-timeout 5m",
+  "kubectl get nodes -o wide",
+]
+
+[tasks.down]
+description = "Destroy the cluster"
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_down_docker"
