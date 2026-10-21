@@ -1,0 +1,12 @@
+# Shared IP address for the Kubernetes API on the control plane nodes. The nodes elect the owner
+# through etcd. net0 is the alias that the QEMU provisioner gives to the virtio network link.
+apiVersion: v1alpha1
+kind: Layer2VIPConfig
+name: 10.5.7.50
+link: net0
+---
+# The API server certificate must contain the VIP; Talos does not add it.
+apiVersion: v1alpha1
+kind: KubeAPIServerConfig
+certExtraSANs:
+  - 10.5.7.50

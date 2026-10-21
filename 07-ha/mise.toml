@@ -1,0 +1,27 @@
+[env]
+CLUSTER = "ha"
+SUBNET = "10.5.7.0/24"
+VIP = "10.5.7.50"
+TALOSCONFIG = "{{config_root}}/build/talosconfig"
+KUBECONFIG = "{{config_root}}/build/kubeconfig"
+
+[tasks.up]
+description = "QEMU cluster with three control plane nodes, one worker and a shared IP (VIP) for the Kubernetes API"
+depends = ["//:preflight-qemu"]
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_up_qemu --controlplanes 3 --workers 1; mise run check"
+
+[tasks.check]
+description = "Show the etcd members, the VIP owner and the KubePrism status"
+run = [
+  "talosctl health --wait-timeout 10m",
+  "talosctl -n 10.5.7.2 etcd members",
+  "talosctl -n 10.5.7.2,10.5.7.3,10.5.7.4 get addresses | grep -E 'NODE|/32'",
+  "talosctl -n 10.5.7.5 get kubeprismstatuses",
+  "kubectl --server https://$VIP:6443 get nodes -o wide",
+]
+
+[tasks.down]
+description = "Destroy the VMs"
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_down_qemu"
