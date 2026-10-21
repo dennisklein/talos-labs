@@ -1,0 +1,24 @@
+[env]
+CLUSTER = "kubespan"
+SUBNET = "10.5.4.0/24"
+TALOSCONFIG = "{{config_root}}/build/talosconfig"
+KUBECONFIG = "{{config_root}}/build/kubeconfig"
+
+[tasks.up]
+description = "Talos in Docker with KubeSpan: a WireGuard full mesh between all nodes"
+depends = ["//:preflight"]
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_up_docker --workers 2; mise run check"
+
+[tasks.check]
+description = "Show the members and the KubeSpan peer status of each node"
+run = [
+  "talosctl health --wait-timeout 5m",
+  "talosctl get members",
+  "talosctl -n 10.5.4.2,10.5.4.3,10.5.4.4 get kubespanpeerstatuses",
+]
+
+[tasks.down]
+description = "Destroy the cluster"
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_down_docker"

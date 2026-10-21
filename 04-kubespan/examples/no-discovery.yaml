@@ -1,0 +1,5 @@
+# Remove the only discovery service. Without a registry, the node has no peer data.
+apiVersion: v1alpha1
+kind: DiscoveryServiceConfig
+name: default
+$patch: delete

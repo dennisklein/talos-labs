@@ -1,0 +1,5 @@
+# KubeSpan: each node makes a WireGuard tunnel to each other node (UDP 51820).
+# The discovery service (DiscoveryServiceConfig "default", in the generated config) distributes the keys.
+apiVersion: v1alpha1
+kind: KubeSpanConfig
+enabled: true

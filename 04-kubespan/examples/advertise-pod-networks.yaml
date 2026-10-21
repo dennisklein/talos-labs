@@ -1,0 +1,4 @@
+# Route the pod CIDRs of the nodes through KubeSpan too (not only the node addresses).
+apiVersion: v1alpha1
+kind: KubeSpanConfig
+advertiseKubernetesNetworks: true
