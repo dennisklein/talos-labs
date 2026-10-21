@@ -12,6 +12,9 @@ talosctl gen config "$CLUSTER" "https://$cp_ip:6443" --with-secrets "$gen/secret
 talosctl config endpoint "$cp_ip"
 talosctl config node "$cp_ip"
 
+for ip in "$cp_ip" "$worker_ip"; do
+  until talosctl -n "$ip" version --insecure >/dev/null 2>&1; do sleep 5; done
+done
 talosctl apply-config --insecure -n "$cp_ip" -f "$gen/controlplane.yaml" -p @node-patches/controlplane-1.yaml
 talosctl apply-config --insecure -n "$worker_ip" -f "$gen/worker.yaml" -p @node-patches/worker-1.yaml
 

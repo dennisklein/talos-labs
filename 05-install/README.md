@@ -145,8 +145,9 @@ Do the steps in the stage folder (`05-install/`). The host must meet the QEMU re
 mise run up
 ```
 
-The task asks for your `sudo` password. It downloads the ISO from the Image Factory (one time), starts two
-VMs and stops. The VMs stay in maintenance mode. Expected output at the end (example):
+The task asks for your `sudo` password. It downloads the ISO from the Image Factory (one time) and starts two
+VMs. `cluster create` returns before the VMs have booted. Thus, the task waits until the maintenance API
+answers on both VMs. The VMs stay in maintenance mode. Expected output at the end (example):
 
 ```
 PROVISIONER           qemu
@@ -461,7 +462,7 @@ without `--insecure` (with the `talosconfig`), as in stage 02.
 | `error: /dev/kvm not found`. | KVM is not available. | Enable virtualization in the firmware. In a VM, enable nested virtualization. Add your user to the group `kvm`. |
 | `cluster create` fails with a CNI or iptables error. | The CNI bundle download failed, or `iptables` is missing. | Delete `~/.talos/cni` and try again. Install `iptables`. |
 | `cluster create` fails with an OVMF error. | No UEFI firmware. | Install `ovmf` (Debian, Ubuntu) or `edk2-ovmf` (Fedora). |
-| `apply-config --insecure` hangs or times out. | The VM did not get its IP address yet. | `tail build/state/install/install-controlplane-1.log`. Wait for the maintenance mode message. |
+| `apply-config --insecure` fails with `no route to host`. | The VM has not booted yet (no ARP answer for its address). | `tail build/state/install/install-controlplane-1.log`. Wait for the maintenance mode message. |
 | The install stops at the image pull. | The VM cannot reach `factory.talos.dev`. | Check the NAT of the host (`net.ipv4.ip_forward=1`) and the DNS. |
 | `bootstrap` fails with `etcd data directory is not empty`. | The node has etcd data from an earlier bootstrap. | Do not bootstrap again. If you want a new cluster, `mise run down` and start again. |
 | `talosctl` commands fail with `certificate signed by unknown authority`. | `TALOSCONFIG` points to the configuration of the provisioner, or you made new secrets after the install. | Use `build/talosconfig` from step 3. Do not run `gen secrets` again for installed nodes. |

@@ -8,6 +8,12 @@ source "$LAB_ROOT/lib/lab.sh"
 # (controlplane.yaml, worker.yaml) to the working directory and its talosconfig to TALOSCONFIG.
 # Keep both in build/provisioner for comparison. Steps 2 to 7 of the README make new ones.
 talos_up_qemu --workers 1 --presets iso,maintenance
+
+# cluster create returns when the VMs start, before they boot. Wait for the maintenance API.
+for n in 1 2; do
+  echo "waiting for the maintenance API on $(node_ip "$n")"
+  until talosctl -n "$(node_ip "$n")" version --insecure >/dev/null 2>&1; do sleep 5; done
+done
 ref="$(build_dir)/provisioner"
 mkdir -p "$ref"
 sudo mv controlplane.yaml worker.yaml "$ref/"
