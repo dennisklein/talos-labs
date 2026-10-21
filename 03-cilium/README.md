@@ -339,6 +339,7 @@ This experiment does not change the cluster. It shows the size of an inline mani
 | Symptom | Cause | Remedy |
 |---------|-------|--------|
 | The `up` task waits a long time at `talosctl kubeconfig`. | The control plane is not up yet, or the bootstrap failed. | In a second terminal: `talosctl -n 10.5.3.2 dmesg -f` and `talosctl -n 10.5.3.2 services`. |
+| `cluster create` waits at `waiting for apid to be ready` with `connection refused` from a worker. | The patch is in `patches/`, not in `patches/controlplane/`. A worker refuses `KubeProxyConfig`: `the following document kinds are only allowed on control plane machines`. | Keep the patch in `patches/controlplane/`. `docker logs cilium-worker-1` shows the error. |
 | `cluster create` fails after 20 minutes, `nodes are not ready`. | Cilium did not start (for example, no image pull). | `kubectl --kubeconfig build/kubeconfig.boot -n kube-system get pods`, then the agent logs. |
 | The agents fail with `operation not permitted` for a module. | A value list has `SYS_MODULE`, or a Cilium function needs a module that the host kernel does not have. | Use `values.yaml` as it is. In Docker, the host kernel must have the module. |
 | CoreDNS does not answer when `bpf.masquerade: true`. | Known issue with the Talos host DNS forwarding (`forwardKubeDNSToHost`). | Do not set `bpf.masquerade`, or set `forwardKubeDNSToHost: false` in `ResolverConfig.hostDNS`. |
