@@ -1,0 +1,14 @@
+# Only the values that Talos needs. cilium-cli does not detect Talos.
+ipam:
+  mode: kubernetes             # use node.spec.podCIDR from Kubernetes (KubeNetworkConfig)
+kubeProxyReplacement: true     # KubeProxyConfig.enabled is false
+k8sServiceHost: localhost      # KubePrism: a local load balancer to the API servers on every node
+k8sServicePort: 7445
+cgroup:
+  autoMount:
+    enabled: false             # Talos mounts cgroup v2 itself
+  hostRoot: /sys/fs/cgroup
+securityContext:
+  capabilities:                # the chart defaults without SYS_MODULE: Talos does not let pods load modules
+    ciliumAgent: [CHOWN, KILL, NET_ADMIN, NET_RAW, IPC_LOCK, SYS_ADMIN, SYS_RESOURCE, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    cleanCiliumState: [NET_ADMIN, SYS_ADMIN, SYS_RESOURCE]

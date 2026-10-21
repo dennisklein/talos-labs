@@ -1,0 +1,19 @@
+[env]
+CLUSTER = "cilium"
+SUBNET = "10.5.3.0/24"
+TALOSCONFIG = "{{config_root}}/build/talosconfig"
+KUBECONFIG = "{{config_root}}/build/kubeconfig"
+
+[tasks.check]
+description = "Wait for Cilium; show that kube-proxy and Flannel are absent"
+run = [
+  "cilium status --wait",
+  "kubectl get nodes -o wide",
+  "kubectl -n kube-system get daemonsets",
+  "echo 'Next: cilium connectivity test'",
+]
+
+[tasks.down]
+description = "Destroy the cluster"
+shell = "bash -c"
+run = "source $LAB_ROOT/lib/lab.sh; talos_down_docker"

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#MISE description="Talos in Docker without Flannel and kube-proxy; Cilium as CNI with kube-proxy replacement"
+#MISE depends=["//:preflight"]
+source "$LAB_ROOT/lib/lab.sh"
+
+# cluster create waits until all nodes are Ready, and a node is Ready only with a CNI.
+# Thus, create the cluster in the background and install Cilium as soon as the API server answers.
+fresh_configs
+talos_up_docker --workers 2 &
+create=$!
+
+boot="$(build_dir)/kubeconfig.boot"   # in-cluster endpoint https://10.5.3.2:6443, for the install only
+until [ -s "$TALOSCONFIG" ] && talosctl -n "$(node_ip 1)" kubeconfig "$boot" --force >/dev/null 2>&1; do
+  sleep 5
+done
+wait_k8s_api "$boot"
+KUBECONFIG="$boot" cilium_up
+
+wait "$create"
+rm -f "$boot"
+mise run check
