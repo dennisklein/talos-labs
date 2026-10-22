@@ -211,11 +211,14 @@ give the label `enforce: privileged` to all test namespaces:
 cilium connectivity test --namespace-labels pod-security.kubernetes.io/enforce=privileged
 ```
 
-The test takes some minutes. Expected output at the end:
+The test takes approximately 10 minutes. Expected output at the end (example):
 
 ```
-✅ [cilium-test-1] All NN tests (MMM actions) successful, K tests skipped, 0 scenarios skipped.
+✅ [cilium-test-1] All 55 tests (176 actions) successful, 80 tests skipped, 9 scenarios skipped.
 ```
+
+The test skips the tests that can change the nodes, and the tests that need more nodes or other Cilium
+functions.
 
 The lines `Warning: would violate PodSecurity "restricted:latest"` are normal. The Talos default `warn` level
 is `restricted`, and the label changes only `enforce`.

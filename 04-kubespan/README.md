@@ -80,7 +80,7 @@ KubeSpan does not change the normal routes. It marks packets and uses policy rou
  nftables chains kubespan_prerouting / kubespan_outgoing
       mark 0x20 set (WireGuard's own UDP packet)?  --yes--> accept, normal routing (enp0s6)
       destination in the set of cluster addresses?  --no---> normal routing (enp0s6)
-      | yes: clamp the TCP MSS to the KubeSpan MTU, set the firewall mark 0x40
+      | yes: clamp the TCP MSS to the KubeSpan MTU (outgoing only), set the firewall mark 0x40
       v
  routing rule (priority 32500): fwmark 0x40/0x60 --> table 180
       |
@@ -159,14 +159,16 @@ The `up` task asks for the `sudo` password, makes the VMs with `talosctl cluster
 peer status at the end (example):
 
 ```
-NODE       NAMESPACE   TYPE               ID                                             VERSION   LABEL                     ENDPOINT         STATE   RX       TX
-10.5.4.2   kubespan    KubeSpanPeerStatus 0bGc...=                                       12        kubespan-worker-1         10.5.4.3:51820   up      183040   201432
-10.5.4.2   kubespan    KubeSpanPeerStatus 9xT1...=                                       12        kubespan-worker-2         10.5.4.4:51820   up      176112   195880
-10.5.4.3   kubespan    KubeSpanPeerStatus Hq2P...=                                       11        kubespan-controlplane-1   10.5.4.2:51820   up      ...
+NODE       NAMESPACE   TYPE                 ID                                             VERSION   LABEL                     ENDPOINT         STATE   RX       TX
+10.5.4.2   kubespan    KubeSpanPeerStatus   8tIvcS6Qppx5r+tcpqrglxeHBPIPAJE+eiCIRK/ogk4=   3         kubespan-worker-1         10.5.4.3:51820   up      41548    138560
+10.5.4.2   kubespan    KubeSpanPeerStatus   w2BPYPIwFg9BH91E6fBjBPys8NkHey7i6A5dFDpAQkg=   3         kubespan-worker-2         10.5.4.4:51820   up      159544   433300
+10.5.4.3   kubespan    KubeSpanPeerStatus   Tzf3Z/+xnVUIL1313v6XiHzC3G1ew9+y2QLi9EBocG0=   4         kubespan-controlplane-1   10.5.4.2:51820   up      135344   40644
+10.5.4.3   kubespan    KubeSpanPeerStatus   w2BPYPIwFg9BH91E6fBjBPys8NkHey7i6A5dFDpAQkg=   4         kubespan-worker-2         10.5.4.4:51820   up      392      364
 ...
 ```
 
-Each node has two peers. All peers are `up`.
+Each node has two peers. All peers are `up`. The ID of a peer is its WireGuard public key. Between the two
+workers, `RX` and `TX` are small: most traffic goes to and from the control plane node.
 
 ### Step 2: Examine the discovery resources
 
@@ -177,6 +179,14 @@ talosctl get members
 ```
 
 `affiliates` and `members` have the same three nodes. The ID of an affiliate is the identity of the node.
+With KubeSpan, the `ADDRESSES` of a member also have its KubeSpan address (example):
+
+```
+NODE       NAMESPACE   TYPE     ID                        VERSION   HOSTNAME                  MACHINE TYPE   OS                ADDRESSES
+10.5.4.2   cluster     Member   kubespan-controlplane-1   3         kubespan-controlplane-1   controlplane   Talos (v1.14.4)   ["10.5.4.2","fd21:f31e:e988:3702:5c28:26ff:fecf:a312"]
+10.5.4.2   cluster     Member   kubespan-worker-1         1         kubespan-worker-1         worker         Talos (v1.14.4)   ["10.5.4.3","fd21:f31e:e988:3702:e0fa:d8ff:fec0:fea8"]
+10.5.4.2   cluster     Member   kubespan-worker-2         1         kubespan-worker-2         worker         Talos (v1.14.4)   ["10.5.4.4","fd21:f31e:e988:3702:f06a:caff:fe61:4717"]
+```
 
 Show the discovery documents in the configuration:
 
@@ -189,21 +199,44 @@ talosctl get machineconfig v1alpha1 -o jsonpath='{.spec}' \
 
 ```bash
 talosctl -n 10.5.4.3 get kubespanidentities -o yaml
-talosctl -n 10.5.4.3 get kubespanpeerspecs
+talosctl -n 10.5.4.3 get kubespanpeerspecs -o yaml
+talosctl -n 10.5.4.3 get links enp0s6
 ```
 
 Expected output of the first command (example, part):
 
 ```yaml
 spec:
-    address: fd5e:13a2:7c40:7302:a0c3:e2ff:fe11:4b2a/128
-    subnet: fd5e:13a2:7c40:7302::/64
-    privateKey: ...
-    publicKey: Hq2P...=
+    address: fd21:f31e:e988:3702:e0fa:d8ff:fec0:fea8/128
+    subnet: fd21:f31e:e988:3702::/64
+    privateKey: GO0z...
+    publicKey: 8tIvcS6Qppx5r+tcpqrglxeHBPIPAJE+eiCIRK/ogk4=
 ```
 
 - `subnet` is the ULA prefix of the cluster. It comes from the cluster ID.
+- The last 64 bits of `address` come from the MAC address of `enp0s6` (`e2:fa:d8:c0:fe:a8` gives
+  `e0fa:d8ff:fec0:fea8`). This is why KubeSpan needs a physical link.
 - `publicKey` is the peer ID on the other nodes.
+
+Expected output of the second command (example, one peer):
+
+```yaml
+spec:
+    address: fd21:f31e:e988:3702:5c28:26ff:fecf:a312
+    allowedIPs:
+        - 10.5.4.2/32
+        - fd21:f31e:e988:3702:5c28:26ff:fecf:a312/128
+    endpoints:
+        - 10.5.4.2:51820
+        - 203.0.113.10:51820
+    label: kubespan-controlplane-1
+```
+
+- `allowedIPs` are the addresses that go into the tunnel to this peer: its node address and its KubeSpan
+  address.
+- `endpoints` has two entries. The first is the node address. The second is the public address of your
+  host: the discovery service saw the connection of the node from this address (NAT) and published it. For
+  nodes in different networks, the public address is the endpoint that works.
 
 ### Step 4: Examine the link, the routing rule and the table
 
@@ -217,11 +250,28 @@ spec:
 
    ```bash
    talosctl -n 10.5.4.3 get routingrulestatuses
-   talosctl -n 10.5.4.3 get routes | grep -E 'TABLE|180'
+   talosctl -n 10.5.4.3 get routes | grep -E 'NODE| 180/'
    ```
 
-   One rule for each IP family sends packets with the mark `0x40/0x60` to table 180. Table 180 has default routes for IPv4 and
-   IPv6 to the link `kubespan`.
+   Expected output (example):
+
+   ```
+   NODE       NAMESPACE   TYPE                ID            VERSION   SRC   DST   TABLE     PRIORITY
+   10.5.4.3   network     RoutingRuleStatus   inet4/00000   1                     local     0
+   10.5.4.3   network     RoutingRuleStatus   inet4/32500   1                     180       32500
+   10.5.4.3   network     RoutingRuleStatus   inet4/32766   1                     main      32766
+   10.5.4.3   network     RoutingRuleStatus   inet4/32767   1                     default   32767
+   10.5.4.3   network     RoutingRuleStatus   inet6/00000   1                     local     0
+   10.5.4.3   network     RoutingRuleStatus   inet6/32500   1                     180       32500
+   10.5.4.3   network     RoutingRuleStatus   inet6/32766   1                     main      32766
+   NODE       NAMESPACE   TYPE          ID                       VERSION   DESTINATION   GATEWAY   LINK       METRIC
+   10.5.4.3   network     RouteStatus   180/inet4///1            1                                 kubespan   1
+   10.5.4.3   network     RouteStatus   180/kubespan/inet6///1   1                                 kubespan   1
+   ```
+
+   One rule for each IP family (priority 32500) sends packets with the mark `0x40/0x60` to table 180. The
+   status shows the table, not the mark. The route IDs start with the table. Table 180 has default routes
+   (no destination) for IPv4 and IPv6 to the link `kubespan`.
 
 3. Show the nftables chains of KubeSpan:
 
@@ -230,7 +280,41 @@ spec:
    talosctl -n 10.5.4.3 get nftableschains kubespan_outgoing -o yaml
    ```
 
-   The chain matches the destination address against the set of cluster addresses and sets the mark.
+   Expected output of the second command (part):
+
+   ```yaml
+   spec:
+       type: route
+       hook: output
+       rules:
+           - matchMark:
+               mask: 96          # 0x60
+               value: 32         # 0x20: a WireGuard packet of KubeSpan
+             verdict: accept
+           - matchOIfName:
+               interfaceName:
+                   - lo
+               operator: ==
+             verdict: accept
+           - matchDestinationAddress:
+               includeSubnets:
+                   - 10.5.4.2/32
+                   - 10.5.4.4/32
+             clampMSS:
+               mtu: 1420
+           - matchDestinationAddress:
+               includeSubnets:
+                   - 10.5.4.2/32
+                   - 10.5.4.4/32
+             setMark:
+               mask: 4294967199  # keep all bits except 0x60
+               xor: 64           # then set 0x40
+             verdict: accept
+   ```
+
+   The `includeSubnets` lists are the cluster addresses: the `allowedIPs` of the peers. The chain
+   `kubespan_prerouting` (hook `prerouting`) sets the same mark on packets that the node forwards, for
+   example from pods. It has no `lo` rule and no MSS rule.
 
 ## Experiments
 
