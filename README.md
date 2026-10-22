@@ -3,24 +3,32 @@
 ## Purpose
 
 This repository is a series of labs ("stages") for Talos Linux 1.14 and later. Each stage is a folder with a
-small Talos cluster and a topic. Stages 01 to 04 run Talos in Docker containers (fast, no disks, no boot).
-Stages 05 to 09 run Talos in QEMU virtual machines (install, upgrade, disks, Secure Boot). Do the stages in
+small Talos cluster and a topic. Stages 01 to 03 run Talos in Docker containers (fast, no disks, no boot).
+Stages 04 to 09 run Talos in QEMU virtual machines (KubeSpan, install, upgrade, disks, Secure Boot). Do the stages in
 sequence. Each stage README has the concepts, ASCII diagrams, a step-by-step procedure with expected output,
 experiments and troubleshooting.
 
 ## The stages
 
 ```
- Docker                                     QEMU (KVM, sudo)
- 01 basic       API, talosctl, resources    05 install    maintenance mode, gen config, bootstrap, reset
-  |                                          |
- 02 config      multi-document config,      06 upgrade    Image Factory, extensions, A/B, rollback, upgrade-k8s
-  |             patches, apply modes         |
-  +-- 03 cilium  no Flannel, no kube-proxy, 07 ha         3 control planes, VIP, etcd, disaster recovery
-  |              Cilium, KubePrism           |
-  +-- 04 kubespan WireGuard mesh, discovery 08 storage    volumes, extra disks, LUKS2, local PV
-                                             |
-                                            09 secure     Secure Boot, TPM, RBAC, ingress firewall
+ Docker                                   QEMU (KVM, sudo)
+ 01 basic      API, talosctl, resources
+  |
+ 02 config     multi-document config,
+  |            patches, apply modes
+  +-- 03 cilium no Flannel, no kube-proxy, Cilium, KubePrism
+  |
+  +------------------------------------> 04 kubespan WireGuard mesh, discovery, peer down
+  |
+  +------------------------------------> 05 install  maintenance mode, gen config, bootstrap, reset
+                                          |
+                                         06 upgrade  Image Factory, extensions, A/B, rollback, upgrade-k8s
+                                          |
+                                         07 ha       3 control planes, VIP, etcd, disaster recovery
+                                          |
+                                         08 storage  volumes, extra disks, LUKS2, local PV
+                                          |
+                                         09 secure   Secure Boot, TPM, RBAC, ingress firewall
 ```
 
 | Stage | Cluster | Subnet | Nodes | Adds |
@@ -28,7 +36,7 @@ experiments and troubleshooting.
 | [01-basic](01-basic/README.md) | `basic` | 10.5.1.0/24 | 1 CP + 2 W, Docker | Talos API, endpoints and nodes, services, resources |
 | [02-machine-config](02-machine-config/README.md) | `config` | 10.5.2.0/24 | 1 CP + 1 W, Docker | Multi-document configuration, patches, apply modes, `try` |
 | [03-cilium](03-cilium/README.md) | `cilium` | 10.5.3.0/24 | 1 CP + 2 W, Docker | Cilium without Flannel and kube-proxy, KubePrism |
-| [04-kubespan](04-kubespan/README.md) | `kubespan` | 10.5.4.0/24 | 1 CP + 2 W, Docker | Discovery service, KubeSpan WireGuard mesh |
+| [04-kubespan](04-kubespan/README.md) | `kubespan` | 10.5.4.0/24 | 1 CP + 2 W, QEMU | Discovery service, KubeSpan WireGuard mesh |
 | [05-install](05-install/README.md) | `install` | 10.5.5.0/24 | 1 CP + 1 W, QEMU | Maintenance mode, manual install, bootstrap, partitions, reset |
 | [06-upgrade](06-upgrade/README.md) | `upgrade` | 10.5.6.0/24 | 1 CP + 1 W, QEMU | Schematic, system extension, Talos and Kubernetes upgrade, rollback |
 | [07-ha](07-ha/README.md) | `ha` | 10.5.7.0/24 | 3 CP + 1 W, QEMU | etcd quorum, Layer 2 VIP, etcd operations, recovery from a snapshot |
@@ -46,8 +54,8 @@ next stage.
  +--------------------------------------------------------------------------------------+
  |  mise     tools (talosctl, kubectl, helm, cilium-cli, jq, yq) and env per stage       |
  |   |                                                                                  |
- |   +-- mise run up --> talosctl cluster create docker   (stages 01-04)                |
- |   |                   talosctl cluster create qemu     (stages 05-09, with sudo)     |
+ |   +-- mise run up --> talosctl cluster create docker   (stages 01-03)                |
+ |   |                   talosctl cluster create qemu     (stages 04-09, with sudo)     |
  |   |                   --config-patch @patches/...      (if the stage has patches)    |
  |   |               --> mise run check                   (health and stage probes)     |
  |   |                                                                                  |
@@ -74,7 +82,7 @@ documents for the procedure and the experiments; you apply them by hand.
 
 ## Quick start
 
-1. Install [mise](https://mise.jdx.dev/) and Docker. For stages 05 to 09, also install the QEMU host
+1. Install [mise](https://mise.jdx.dev/) and Docker. For stages 04 to 09, also install the QEMU host
    requirements (see below). These come from the operating system, not from mise.
 2. In the repository root, trust the configuration and install the tools:
 
@@ -116,11 +124,11 @@ Other useful commands:
 | Item | Note |
 |------|------|
 | Linux host, x86_64 | The labs are tested on Linux. |
-| Docker | Stages 01 to 04. The user must be in the group `docker`. |
+| Docker | Stages 01 to 03. The user must be in the group `docker`. |
 | Internet access | Images from `ghcr.io`, `factory.talos.dev`, `registry.k8s.io`; discovery at `discovery.talos.dev`. |
 | `br_netfilter` kernel module | `sudo modprobe br_netfilter`. Without it, `cluster create docker` fails with `Failed to check br_netfilter`. |
 
-### QEMU stages (05 to 09)
+### QEMU stages (04 to 09)
 
 | Item | Debian, Ubuntu | Fedora | Note |
 |------|----------------|--------|------|
@@ -132,7 +140,7 @@ Other useful commands:
 | firewalld | | | If firewalld is active, it rejects DHCP from the VMs on the new bridge. The `up` tasks put the bridge into the zone `trusted` (runtime only, until the next reload). |
 | Docker | | | If Docker is installed, it sets the policy of the iptables chain `FORWARD` to `DROP`. The VMs then have no internet access. The `up` tasks add two `ACCEPT` rules for the bridges `talos*` to the chain `DOCKER-USER` (until the next reboot). |
 | sudo | | | `talosctl cluster create qemu` runs as root. The `up` and `down` tasks ask for the `sudo` password. |
-| `socat`, `nc`, `openssl`, `curl` | `socat netcat-openbsd openssl curl` | `socat nmap-ncat openssl curl` | Experiments in stages 06, 07 and 09. |
+| `socat`, `nc`, `openssl`, `curl`, `tcpdump` | `socat netcat-openbsd openssl curl tcpdump` | `socat nmap-ncat openssl curl tcpdump` | Experiments in stages 04, 06, 07 and 09. |
 | Memory | | | 2 GiB per VM. Stage 07 needs 8 GiB free. |
 
 `talosctl` downloads the CNI plugins for the VMs to `~/.talos/cni` and caches the boot images in `~/.talos`.

@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Stages 01 to 04 used Talos in Docker. A container has no disk, no boot loader and no install step. This stage
-uses QEMU virtual machines (VMs). The VMs boot the Talos ISO without a machine configuration, and you do the
+Stages 01 to 03 used Talos in Docker. A container has no disk, no boot loader and no install step. Stage 04
+booted QEMU virtual machines (VMs) from the ISO, without an install. This stage also uses QEMU VMs. The VMs boot the Talos ISO without a machine configuration, and you do the
 complete install procedure by hand, as on a bare metal server.
 
 When you complete this stage, you know:

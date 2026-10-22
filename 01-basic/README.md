@@ -111,7 +111,7 @@ All containers connect to one Docker bridge network. The network has the name of
 ```
 
 A container is not a full machine. Thus, these functions are not available in Docker: install to a disk,
-`upgrade`, `reset`, disk encryption and the boot loader. The QEMU stages (05 to 09) use virtual machines for
+`upgrade`, `reset`, disk encryption and the boot loader. The QEMU stages (04 to 09) use virtual machines for
 these functions. The Docker provisioner can make only one control plane node.
 
 ### Resources and controllers
@@ -481,7 +481,7 @@ initial state.
 | `cluster create` fails, `network with name basic already exists`. | A cluster with this name exists from an earlier run. | Do `mise run down` first. |
 | Flannel pods fail with `Failed to check br_netfilter`. | The host kernel has no `br_netfilter` module loaded. | `sudo modprobe br_netfilter`. |
 | `talosctl` shows `rpc error: code = Unavailable` for `-n 10.5.1.x`. | The node is not ready, or the address is wrong. | `talosctl get members` shows the addresses. Wait for `talosctl health`. |
-| The `upgrade` or `reset` command fails, "not supported". | The node is a container. | Use the QEMU stages (05 to 09). |
+| The `upgrade` or `reset` command fails, "not supported". | The node is a container. | Use the QEMU stages (04 to 09). |
 
 ## Clean up
 

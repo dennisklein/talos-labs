@@ -5,10 +5,10 @@ TALOSCONFIG = "{{config_root}}/build/talosconfig"
 KUBECONFIG = "{{config_root}}/build/kubeconfig"
 
 [tasks.up]
-description = "Talos in Docker with KubeSpan: a WireGuard full mesh between all nodes"
-depends = ["//:preflight"]
+description = "QEMU cluster with KubeSpan: a WireGuard full mesh between all nodes"
+depends = ["//:preflight-qemu"]
 shell = "bash -c"
-run = "source $LAB_ROOT/lib/lab.sh; talos_up_docker --workers 2; mise run check"
+run = "source $LAB_ROOT/lib/lab.sh; talos_up_qemu --workers 2; mise run check"
 
 [tasks.check]
 description = "Show the members and the KubeSpan peer status of each node"
@@ -19,6 +19,6 @@ run = [
 ]
 
 [tasks.down]
-description = "Destroy the cluster"
+description = "Destroy the VMs"
 shell = "bash -c"
-run = "source $LAB_ROOT/lib/lab.sh; talos_down_docker"
+run = "source $LAB_ROOT/lib/lab.sh; talos_down_qemu"

@@ -6,6 +6,10 @@ KubeSpan connects all nodes of a cluster with WireGuard tunnels. Talos makes the
 sets the routes itself. This stage enables KubeSpan and shows each part: the discovery service, the
 WireGuard peers, the routing machinery and the encrypted traffic on the wire.
 
+This is the first stage with QEMU virtual machines: KubeSpan does not start in Docker (see
+[Why QEMU](#why-qemu)). Before you start, install the QEMU host requirements (see the
+[top-level README](../README.md#qemu-stages-04-to-09)).
+
 When you complete this stage, you know:
 
 - How the discovery service lets nodes find each other (identities, affiliates, members).
@@ -13,6 +17,7 @@ When you complete this stage, you know:
 - How Talos sends cluster traffic into the tunnel: nftables mark, routing rule, routing table 180.
 - What `advertiseKubernetesNetworks` changes.
 - Why KubeSpan does not work without discovery.
+- When a peer is `down`, and what happens to its traffic.
 
 ## Concepts
 
@@ -50,7 +55,8 @@ Three resources show the steps:
 With `KubeSpanConfig.enabled: true`, each node:
 
 1. makes a WireGuard key pair (the public key goes into the affiliate data),
-2. gets an address from a cluster-specific IPv6 ULA prefix for the link `kubespan`,
+2. gets an address for the link `kubespan`: the cluster-specific IPv6 ULA prefix plus a part from the MAC
+   address of the first physical link,
 3. makes one WireGuard peer for each other member, with the endpoints from the discovery data,
 4. tries the endpoints until the handshake works (UDP 51820).
 
@@ -72,8 +78,8 @@ KubeSpan does not change the normal routes. It marks packets and uses policy rou
       |
       v
  nftables chains kubespan_prerouting / kubespan_outgoing
-      mark 0x20 set (WireGuard's own UDP packet)?  --yes--> accept, normal routing (eth0)
-      destination in the set of cluster addresses?  --no---> normal routing (eth0)
+      mark 0x20 set (WireGuard's own UDP packet)?  --yes--> accept, normal routing (enp0s6)
+      destination in the set of cluster addresses?  --no---> normal routing (enp0s6)
       | yes: clamp the TCP MSS to the KubeSpan MTU, set the firewall mark 0x40
       v
  routing rule (priority 32500): fwmark 0x40/0x60 --> table 180
@@ -82,7 +88,7 @@ KubeSpan does not change the normal routes. It marks packets and uses policy rou
  table 180: default routes (IPv4 and IPv6) dev kubespan
       |
       v
- WireGuard encrypts, marks its UDP packet 0x20 --> UDP 51820 to 10.5.4.4 on eth0
+ WireGuard encrypts, marks its UDP packet 0x20 --> UDP 51820 to 10.5.4.4 on enp0s6
 ```
 
 - The set of cluster addresses has the node addresses of all peers. By default, this is also true when a
@@ -96,25 +102,35 @@ In this stage, Flannel still makes its VXLAN tunnel (UDP 4789) between the node 
 addresses are in the KubeSpan set. Thus, the VXLAN packets go inside WireGuard:
 
 ```
- eth0 frame: IP 10.5.4.3 -> 10.5.4.4  UDP 51820  [ WireGuard, encrypted:
-                                                    IP 10.5.4.3 -> 10.5.4.4  UDP 4789 [ VXLAN:
-                                                      IP 10.244.1.5 -> 10.244.2.7 (pod to pod) ] ]
+ enp0s6 frame: IP 10.5.4.3 -> 10.5.4.4  UDP 51820  [ WireGuard, encrypted:
+                                                      IP 10.5.4.3 -> 10.5.4.4  UDP 4789 [ VXLAN:
+                                                        IP 10.244.1.5 -> 10.244.2.7 (pod to pod) ] ]
 ```
 
 ### Why use KubeSpan
 
 KubeSpan is for clusters where nodes are in different networks: two data centers, a cloud and an office, or
 nodes behind NAT. The CNI then needs only node-to-node connectivity, and KubeSpan gives it, encrypted. In
-this lab, all nodes are on one Docker bridge, so the effect is only the encryption.
+this lab, all nodes are on one bridge, so the effect is only the encryption.
+
+### Why QEMU
+
+The KubeSpan identity needs the MAC address of the first *physical* link. Talos counts a link as physical
+if it is an Ethernet link without a kind (`talosctl get links`, column `KIND`). In a Docker container, the
+only link is `eth0` of kind `veth`. Thus, there is no physical link, Talos makes no KubeSpan identity, and
+KubeSpan does not start. The configuration is valid, and no error shows: `kubespanidentities`,
+`kubespanpeerspecs` and the link `kubespan` stay absent. In a QEMU VM, the link `enp0s6` is a virtio network
+card, a physical link.
 
 ## Lab topology
 
 | Item | Value |
 |------|-------|
 | Cluster name | `kubespan` |
-| Provisioner | Docker |
+| Provisioner | QEMU, boot from the ISO, no install |
 | Nodes | `kubespan-controlplane-1` (10.5.4.2), `kubespan-worker-1` (10.5.4.3), `kubespan-worker-2` (10.5.4.4) |
-| Docker network | `kubespan`, `10.5.4.0/24` |
+| Network | Bridge `talos<hash>`, `10.5.4.0/24`, gateway 10.5.4.1. Node link `enp0s6` (alias `net0`). |
+| Memory | 2 GiB per VM, 6 GiB in total |
 | KubeSpan | enabled on all nodes, UDP 51820, link `kubespan`, MTU 1420 |
 | Discovery | `https://discovery.talos.dev/` (default) |
 | CNI | Flannel (VXLAN inside KubeSpan), kube-proxy |
@@ -130,7 +146,7 @@ this lab, all nodes are on one Docker bridge, so the effect is only the encrypti
 
 ## Procedure
 
-Do the steps in the stage folder (`04-kubespan/`). The nodes need HTTPS access to `discovery.talos.dev`.
+Do the steps in the stage folder (`04-kubespan/`). The VMs need HTTPS access to `discovery.talos.dev`.
 
 ### Step 1: Start the lab
 
@@ -138,8 +154,9 @@ Do the steps in the stage folder (`04-kubespan/`). The nodes need HTTPS access t
 mise run up
 ```
 
-The `up` task makes the cluster with `--config-patch @patches/kubespan.yaml` and runs `check`. Expected output
-of the peer status at the end (example):
+The `up` task asks for the `sudo` password, makes the VMs with `talosctl cluster create qemu --workers 2
+--config-patch @patches/kubespan.yaml` and runs `check`. This takes 3 to 6 minutes. Expected output of the
+peer status at the end (example):
 
 ```
 NODE       NAMESPACE   TYPE               ID                                             VERSION   LABEL                     ENDPOINT         STATE   RX       TX
@@ -222,6 +239,9 @@ initial state.
 
 ### Experiment 1: Capture the encrypted traffic
 
+Talos has no `tcpdump`. `talosctl pcap` captures on the node and sends the packets to the client in pcap
+format. `tcpdump` on the host reads and filters them.
+
 1. Start a server pod on `kubespan-worker-1` and a client pod on `kubespan-worker-2`:
 
    ```bash
@@ -232,23 +252,22 @@ initial state.
    SRV=$(kubectl get pod srv -o jsonpath='{.status.podIP}'); echo "$SRV"
    ```
 
-2. In a second terminal, capture on `eth0` of `kubespan-worker-1`. The Talos image has no `tcpdump`. Thus,
-   start a `netshoot` container in the network namespace of the node container:
+2. Capture on the link `enp0s6` of `kubespan-worker-1` for 15 seconds, and send a request in this time:
 
    ```bash
-   docker run --rm --net container:kubespan-worker-1 nicolaka/netshoot \
-     tcpdump -ni eth0 -c 6 'udp port 51820 or udp port 4789'
-   ```
-
-3. In the first terminal, send a request:
-
-   ```bash
-   kubectl exec cli -- curl -s -o /dev/null -w '%{http_code}\n' "http://$SRV"
+   talosctl -n 10.5.4.3 pcap -i enp0s6 --duration 15s -o - > build/enp0s6.pcap &
+   sleep 3; kubectl exec cli -- curl -s -o /dev/null -w '%{http_code}\n' "http://$SRV"; wait
    ```
 
    Expected output: `200`.
 
-4. Examine the capture. Expected output (example):
+3. Examine the capture:
+
+   ```bash
+   tcpdump -nr build/enp0s6.pcap 'udp port 51820 or udp port 4789' | head
+   ```
+
+   Expected output (example):
 
    ```
    IP 10.5.4.4.51820 > 10.5.4.3.51820: UDP, length 176
@@ -256,23 +275,25 @@ initial state.
    ...
    ```
 
-   All packets are WireGuard (port 51820). There is no VXLAN packet (port 4789) on `eth0`. The VXLAN packets
-   are inside the tunnel.
+   All packets are WireGuard (port 51820). There is no VXLAN packet (port 4789) on `enp0s6`. The VXLAN
+   packets are inside the tunnel.
 
-5. Capture on the `kubespan` link. Here you see the VXLAN packets before encryption:
+4. Capture on the link `kubespan` in the same way. Here you see the VXLAN packets before encryption:
 
    ```bash
-   docker run --rm --net container:kubespan-worker-1 nicolaka/netshoot tcpdump -ni kubespan -c 4 udp port 4789
+   talosctl -n 10.5.4.3 pcap -i kubespan --duration 15s -o - > build/kubespan.pcap &
+   sleep 3; kubectl exec cli -- curl -s -o /dev/null -w '%{http_code}\n' "http://$SRV"; wait
+   tcpdump -nr build/kubespan.pcap 'udp port 4789' | head -4
    ```
 
-   Send the request of step 3 again. Expected output (example):
+   Expected output (example):
 
    ```
    IP 10.5.4.4.41234 > 10.5.4.3.4789: VXLAN, flags [I] (0x08), vni 1
    IP 10.244.2.9.51334 > 10.244.1.6.80: Flags [S], ...
    ```
 
-6. Delete the pods:
+5. Delete the pods:
 
    ```bash
    kubectl delete pod srv cli
@@ -322,57 +343,55 @@ initial state.
 
    Without a registry, a node cannot get the public keys and endpoints of its peers.
 
-### Experiment 4: A new peer joins the mesh
+### Experiment 4: A peer goes down
 
-1. Make a fourth node with the same machine configuration as a worker. Read the configuration of
-   `kubespan-worker-1`:
+A peer is `down` when its last WireGuard handshake is older than 275 seconds. By default
+(`allowDownPeerBypass: false`), its traffic still goes into the tunnel and stops. Talos never sends it
+unencrypted.
+
+1. Freeze the VM of `kubespan-worker-2` with the QEMU monitor:
 
    ```bash
-   talosctl -n 10.5.4.3 get machineconfig v1alpha1 -o jsonpath='{.spec}' > build/worker.yaml
+   echo stop | sudo socat - UNIX-CONNECT:build/state/kubespan/kubespan-worker-2.monitor
    ```
 
-2. Start a Talos container by hand, with the configuration in the environment variable `USERDATA` (this is
-   what the Docker provisioner does):
+2. Watch the peer status on the control plane node. Stop the watch with `Ctrl+C` when the state of
+   `kubespan-worker-2` is `down` (after approximately 5 minutes):
 
    ```bash
-   docker run -d --name kubespan-worker-3 --hostname kubespan-worker-3 --network kubespan --ip 10.5.4.10 \
-     --privileged --security-opt seccomp=unconfined --read-only \
-     --sysctl net.ipv6.conf.all.disable_ipv6=0 \
-     --mount type=tmpfs,destination=/run --mount type=tmpfs,destination=/system --mount type=tmpfs,destination=/tmp \
-     --mount type=volume,destination=/var --mount type=volume,destination=/system/state \
-     --mount type=volume,destination=/opt \
-     -e PLATFORM=container -e USERDATA="$(base64 -w0 build/worker.yaml)" \
-     "ghcr.io/siderolabs/talos:$(talosctl version --client | awk '/Tag:/ {print $2; exit}')"
+   talosctl -n 10.5.4.2 get kubespanpeerstatuses --watch
    ```
 
-3. Wait until the node is a member, and the other nodes have a new peer:
+   The `RX` counter of `kubespan-worker-2` stops. `kubectl get nodes` shows `kubespan-worker-2` as `NotReady`
+   after approximately 40 seconds, much earlier than KubeSpan.
+
+3. Show that the address of the peer is still routed into the tunnel:
 
    ```bash
-   talosctl get members --watch          # stop with Ctrl+C when kubespan-worker-3 shows
+   talosctl -n 10.5.4.2 get nftableschains kubespan_outgoing -o yaml | grep -c 10.5.4.4
+   ```
+
+   The result is not `0`.
+
+4. Continue the VM. After the next handshake, the state is `up` again:
+
+   ```bash
+   echo cont | sudo socat - UNIX-CONNECT:build/state/kubespan/kubespan-worker-2.monitor
    talosctl -n 10.5.4.2 get kubespanpeerstatuses
    kubectl get nodes
    ```
-
-   No other node needed a change. The discovery service gave them the new key and endpoint.
-
-4. Remove the node:
-
-   ```bash
-   kubectl delete node kubespan-worker-3
-   docker rm -f -v kubespan-worker-3
-   ```
-
-   The member stays in the list until the discovery data expires (up to 30 minutes).
 
 ## Troubleshooting
 
 | Symptom | Cause | Remedy |
 |---------|-------|--------|
-| `get members` shows only the local node. | The node cannot reach `discovery.talos.dev:443`. | Check the internet access of the Docker network. A proxy is not supported for discovery in this lab. |
-| Peer state stays `unknown` or `down`. | UDP 51820 is blocked, or the host kernel has no WireGuard module. | `lsmod | grep wireguard` on the host. `sudo modprobe wireguard`. |
+| `get members` shows only the local node. | The VM cannot reach `discovery.talos.dev:443`. | Check the internet access of the VMs (firewalld and Docker rows in the [host requirements](../README.md#qemu-stages-04-to-09)). A proxy is not supported for discovery in this lab. |
+| Peer state stays `unknown` or `down`. | The host firewall blocks UDP 51820 on the bridge. | The bridge must be in the firewalld zone `trusted` (the `up` task does this). `sudo firewall-cmd --get-zone-of-interface=<bridge>`. |
+| `kubespanidentities` is empty and the link `kubespan` does not exist, with no error. | The node has no physical link (for example, a Docker container: `eth0` is a `veth`). | Use VMs or real machines (see [Why QEMU](#why-qemu)). |
 | `KubeSpan requires cluster discovery to be enabled`. | The configuration has `KubeSpanConfig` but no `DiscoveryServiceConfig`. | Keep a discovery service document. |
 | TCP between pods works, but large UDP packets between pods are lost. | The VXLAN packets are larger than the KubeSpan MTU (1420). KubeSpan clamps only the TCP MSS. | Set the CNI MTU to 1420 minus the CNI overhead (VXLAN: 50, thus 1370). |
-| Experiment 4: the container stops at once. | A mount or a flag is missing. | `docker logs kubespan-worker-3`. Compare with `docker inspect kubespan-worker-1`. |
+| `socat: command not found`. | `socat` is not installed on the host. | Install `socat`. |
+| `tcpdump: command not found`. | `tcpdump` is not installed on the host. | Install `tcpdump`. |
 
 ## Clean up
 
@@ -380,7 +399,7 @@ initial state.
 mise run down
 ```
 
-If you did not complete experiment 4, also do `docker rm -f -v kubespan-worker-3`.
+If you did not complete experiment 4, the VM is frozen. `mise run down` removes it too.
 
 ## References
 
