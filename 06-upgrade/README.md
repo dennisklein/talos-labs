@@ -190,15 +190,26 @@ talosctl get securitystate -o yaml | yq .spec
    Expected output (example, part):
 
    ```
-   10.5.6.3: pulling factory.talos.dev/metal-installer/9a7f...:v1.14.4 ...
+   10.5.6.3: pulled image factory.talos.dev/metal-installer/9a7f...@sha256:...
+   10.5.6.3: ... running Talos installer v1.14.4
+   10.5.6.3: ... sd-boot: found existing UKIs during upgrade: [Talos-v1.14.3.efi]
+   10.5.6.3: ... copying /usr/install/amd64/vmlinuz.efi to /boot/EFI/EFI/Linux/Talos-v1.14.4.efi
+   10.5.6.3: ... installation of v1.14.4 complete
    10.5.6.3: upgrade completed
-   cordoning node upgrade-worker-1
-   evicting pod kube-system/coredns-...
-   ...
-   watching nodes: [10.5.6.3]
-       * 10.5.6.3: post check passed
-   uncordoning node upgrade-worker-1
+   upgrade-worker-1: cordoning node
+   upgrade-worker-1: draining node
+   upgrade-worker-1: evicting pod kube-system/coredns-...
+   upgrade-worker-1: node drained
+   "10.5.6.3": sequence: reboot action: START
+   "10.5.6.3": error: reboot sequence completed
+   "10.5.6.3": unavailable, retrying...
+   "10.5.6.3": post check passed
+   upgrade-worker-1: waiting for node to become Ready
+   upgrade-worker-1: uncordoning node
+   upgrade-worker-1: node uncordoned
    ```
+
+   The line `error: reboot sequence completed` is normal: the connection stops when the node reboots.
 
    In the second terminal, the node changes to `Ready,SchedulingDisabled`, then `NotReady`, then `Ready`.
 
@@ -212,7 +223,8 @@ talosctl get securitystate -o yaml | yq .spec
    ```
 
    - The server version is the new one.
-   - There are two extensions: `qemu-guest-agent` and `schematic` with the new ID.
+   - There are two extensions: `qemu-guest-agent` (version `11.1.1`, example) and `schematic` with the new ID.
+     The list of services has the new service `ext-qemu-guest-agent`.
    - The booted entry is the new UKI file.
    - The service `ext-qemu-guest-agent` is `Running`.
 

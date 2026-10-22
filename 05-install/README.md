@@ -2,9 +2,10 @@
 
 ## Purpose
 
-Stages 01 to 03 used Talos in Docker. A container has no disk, no boot loader and no install step. Stage 04
-booted QEMU virtual machines (VMs) from the ISO, without an install. This stage also uses QEMU VMs. The VMs boot the Talos ISO without a machine configuration, and you do the
-complete install procedure by hand, as on a bare metal server.
+Stages 01 to 03 used Talos in Docker. A container has no disk, no boot loader and no install step. In stage
+04, the QEMU provisioner did the install for you. In this stage, the QEMU virtual machines (VMs) boot the
+Talos ISO without a machine configuration, and you do the complete install procedure by hand, as on a bare
+metal server.
 
 When you complete this stage, you know:
 
@@ -80,7 +81,7 @@ that has etcd data.
 
 | Partition | Size (example) | Content |
 |-----------|----------------|---------|
-| `EFI` | about 1 GB | Boot loader (systemd-boot) and the Talos boot images (UKI): the running one and the previous one. |
+| `EFI` | about 2 GB | Boot loader (systemd-boot) and the Talos boot images (UKI): the running one and the previous one. |
 | `META` | 1 MB | Small key-value data that the boot loader and Talos share, for example the upgrade state. |
 | `STATE` | about 100 MB | The machine configuration and the node identity. |
 | `EPHEMERAL` | rest of the disk | `/var`: etcd data, container images, kubelet data, logs. |
@@ -161,8 +162,8 @@ KUBERNETES ENDPOINT   https://10.5.5.1:6443
 NODES:
 
 NAME                     TYPE           IP         CPU    RAM      DISK
-install-controlplane-1   controlplane   10.5.5.2   2.00   2.1 GB   10 GB
-install-worker-1         worker         10.5.5.3   2.00   2.1 GB   10 GB
+install-controlplane-1   controlplane   10.5.5.2   2.00   2.1 GB   11 GB
+install-worker-1         worker         10.5.5.3   2.00   2.1 GB   11 GB
 
 The VMs are in maintenance mode. Continue with step 2 of the README, or run 'mise run install'.
 ```
@@ -186,14 +187,16 @@ The VMs are in maintenance mode. Continue with step 2 of the README, or run 'mis
    Expected output of the first command (example):
 
    ```
-   NODE   NAMESPACE   TYPE   ID      VERSION   SIZE     READ ONLY   TRANSPORT   ROTATIONAL   WWID   MODEL   SERIAL
-          runtime     Disk   loop0   1         75 MB    true
-          runtime     Disk   sr0     1         310 MB   true        ata         ...
-          runtime     Disk   vda     1         11 GB    false       virtio      true
-          runtime     Disk   vdb     1         6.4 GB   false       virtio      true
+   NODE       NAMESPACE   TYPE   ID      VERSION   SIZE     READ ONLY   TRANSPORT   ROTATIONAL   WWID   MODEL          SERIAL
+   10.5.5.3   runtime     Disk   loop0   2         4.1 kB   true
+   10.5.5.3   runtime     Disk   loop1   2         94 MB    true
+   10.5.5.3   runtime     Disk   sr0     2         364 MB   true        sata        true                QEMU DVD-ROM
+   10.5.5.3   runtime     Disk   sr1     2         0 B      true        sata                            QEMU DVD-ROM
+   10.5.5.3   runtime     Disk   vda     2         11 GB    false       virtio      true
+   10.5.5.3   runtime     Disk   vdb     2         6.4 GB   false       virtio      true
    ```
 
-   - `sr0` is the CD-ROM drive with the ISO. `loop0` is the Talos root file system (SquashFS) in RAM.
+   - `sr0` is the CD-ROM drive with the ISO. `loop1` is the Talos root file system (SquashFS) in RAM.
    - `vda` is empty. This is the install disk.
 
 3. Try to read a file. The maintenance API refuses it:
@@ -258,6 +261,9 @@ talosctl config info
    talosctl apply-config --insecure -n 10.5.5.2 -f build/controlplane.yaml -p @node-patches/controlplane-1.yaml
    ```
 
+   Expected output: `Applied configuration without a reboot`. The node applies the configuration at once.
+   Then the install runs in the background.
+
    The flag `-p` patches the file before `talosctl` sends it. The file on the disk does not change.
 
 2. Apply the worker configuration:
@@ -275,14 +281,8 @@ talosctl config info
    Expected lines (example, part):
 
    ```
-   [talos] task install (1/1): starting
-   [talos] pulling "factory.talos.dev/metal-installer/3765...:v1.14.4"
-   [talos] created EFI (C12A7328-F81F-11D2-BA4B-00A0C93EC93B) size 1073741824 bytes
-   [talos] created META (...) size 1048576 bytes
-   [talos] created STATE (...) size 104857600 bytes
-   [talos] created EPHEMERAL (...) size ...
-   [talos] installation of v1.14.4 complete
-   [talos] rebooting
+   ... running Talos installer v1.14.4
+   ... installation of v1.14.4 complete
    ```
 
    Stop `tail` with `Ctrl+C` when the node shows `etcd is waiting to join the cluster` or
@@ -335,10 +335,10 @@ Do the experiments after the procedure, in the sequence below.
    ```
    NODE       NAMESPACE   TYPE               ID     VERSION   TYPE        SIZE     DISCOVERED   LABEL       PARTITIONLABEL
    10.5.5.2   runtime     DiscoveredVolume   vda    1         disk        11 GB    gpt
-   10.5.5.2   runtime     DiscoveredVolume   vda1   1         partition   1.1 GB   vfat         EFI         EFI
+   10.5.5.2   runtime     DiscoveredVolume   vda1   1         partition   2.2 GB   vfat         EFI         EFI
    10.5.5.2   runtime     DiscoveredVolume   vda2   1         partition   1.0 MB   talosmeta                META
    10.5.5.2   runtime     DiscoveredVolume   vda3   1         partition   105 MB   xfs          STATE       STATE
-   10.5.5.2   runtime     DiscoveredVolume   vda4   1         partition   9.5 GB   xfs          EPHEMERAL   EPHEMERAL
+   10.5.5.2   runtime     DiscoveredVolume   vda4   1         partition   8.4 GB   xfs          EPHEMERAL   EPHEMERAL
    ```
 
 2. Show the volumes that Talos manages, and their mount points:
@@ -348,18 +348,12 @@ Do the experiments after the procedure, in the sequence below.
    talosctl get mountstatuses
    ```
 
-   `STATE` is mounted at `/system/state`. `EPHEMERAL` is mounted at `/var`.
+   `EPHEMERAL` (`/dev/vda4`) is mounted at `/var`. The directories `/var/lib`, `/var/log`, `CRI`, `ETCD`
+   and `KUBELET` are volumes of type `directory` on it. `STATE` is `ready`, but it is not in the list of
+   mounts: Talos mounts it only for a short time, when it reads or writes the configuration.
 
-3. Show the configuration file in STATE:
-
-   ```bash
-   talosctl list /system/state
-   ```
-
-   Expected output: one file, `config.yaml`.
-
-4. Compare with the Docker stages: in Docker, `/system/state` and `/var` are Docker volumes, and there is no
-   `EFI` or `META` partition.
+3. Compare with the Docker stages: in Docker, `STATE` and `EPHEMERAL` are directories in Docker volumes,
+   `META` stays `waiting`, and there is no `EFI` partition.
 
 ### Experiment 2: Compare your configuration with the configuration of the provisioner
 

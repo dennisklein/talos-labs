@@ -127,7 +127,7 @@ card, a physical link.
 | Item | Value |
 |------|-------|
 | Cluster name | `kubespan` |
-| Provisioner | QEMU, boot from the ISO, no install |
+| Provisioner | QEMU, preset `iso`: boot from the ISO, unattended install to `/dev/vda` |
 | Nodes | `kubespan-controlplane-1` (10.5.4.2), `kubespan-worker-1` (10.5.4.3), `kubespan-worker-2` (10.5.4.4) |
 | Network | Bridge `talos<hash>`, `10.5.4.0/24`, gateway 10.5.4.1. Node link `enp0s6` (alias `net0`). |
 | Memory | 2 GiB per VM, 6 GiB in total |
@@ -336,14 +336,19 @@ format. `tcpdump` on the host reads and filters them.
    SRV=$(kubectl get pod srv -o jsonpath='{.status.podIP}'); echo "$SRV"
    ```
 
-2. Capture on the link `enp0s6` of `kubespan-worker-1` for 15 seconds, and send a request in this time:
+2. Capture on the link `enp0s6` of `kubespan-worker-1` for 15 seconds, and send a request in this time.
+   Use the worker as endpoint (`-e`): then the capture stream goes directly from the worker to the host,
+   outside of KubeSpan. Through the control plane endpoint, the stream itself goes through the tunnel and
+   fills the capture.
 
    ```bash
-   talosctl -n 10.5.4.3 pcap -i enp0s6 --duration 15s -o - > build/enp0s6.pcap &
-   sleep 3; kubectl exec cli -- curl -s -o /dev/null -w '%{http_code}\n' "http://$SRV"; wait
+   talosctl -e 10.5.4.3 -n 10.5.4.3 pcap -i enp0s6 --duration 15s -o - > build/enp0s6.pcap &
+   sleep 3; kubectl exec cli -- curl -s -o /dev/null -w '%{http_code}\n' "http://$SRV"; wait $!
    ```
 
-   Expected output: `200`.
+   Expected output: `200`. At the end of the capture, `talosctl` shows
+   `rpc error: code = Canceled desc = stream terminated by RST_STREAM with error code: CANCEL`. This is
+   normal.
 
 3. Examine the capture:
 
@@ -354,8 +359,9 @@ format. `tcpdump` on the host reads and filters them.
    Expected output (example):
 
    ```
-   IP 10.5.4.4.51820 > 10.5.4.3.51820: UDP, length 176
-   IP 10.5.4.3.51820 > 10.5.4.4.51820: UDP, length 176
+   IP 10.5.4.4.51820 > 10.5.4.3.51820: UDP, length 160
+   IP 10.5.4.3.51820 > 10.5.4.4.51820: UDP, length 96
+   IP 10.5.4.4.51820 > 10.5.4.3.51820: UDP, length 544
    ...
    ```
 
@@ -365,17 +371,20 @@ format. `tcpdump` on the host reads and filters them.
 4. Capture on the link `kubespan` in the same way. Here you see the VXLAN packets before encryption:
 
    ```bash
-   talosctl -n 10.5.4.3 pcap -i kubespan --duration 15s -o - > build/kubespan.pcap &
-   sleep 3; kubectl exec cli -- curl -s -o /dev/null -w '%{http_code}\n' "http://$SRV"; wait
+   talosctl -e 10.5.4.3 -n 10.5.4.3 pcap -i kubespan --duration 15s -o - > build/kubespan.pcap &
+   sleep 3; kubectl exec cli -- curl -s -o /dev/null -w '%{http_code}\n' "http://$SRV"; wait $!
    tcpdump -nr build/kubespan.pcap 'udp port 4789' | head -4
    ```
 
    Expected output (example):
 
    ```
-   IP 10.5.4.4.41234 > 10.5.4.3.4789: VXLAN, flags [I] (0x08), vni 1
-   IP 10.244.2.9.51334 > 10.244.1.6.80: Flags [S], ...
+   IP 10.5.4.4.44006 > 10.5.4.3.vxlan: VXLAN, flags [I] (0x08), vni 1
+   IP 10.244.2.2.51064 > 10.244.1.2.http: Flags [S], seq 185012781, win 65170, options [mss 1330,...], length 0
    ```
+
+   The link `kubespan` has no Ethernet header (`link-type RAW`). `tcpdump` shows the port names `vxlan` and
+   `http`. The inner TCP MSS is 1330: KubeSpan MTU 1420 minus 50 (VXLAN) minus 40 (IP and TCP).
 
 5. Delete the pods:
 
