@@ -257,10 +257,12 @@ valid only on some platforms.
    Expected output (example):
 
    ```
-   > lab.example.com/tier: blue
+   > labels:
+   >     lab.example.com/tier: blue
    ```
 
-   Talos merged the `labels` map. The other labels stay.
+   The `KubeNodeConfig` document had no `labels` map. Talos added it. If the map exists, Talos merges the
+   keys, and the other labels stay.
 
 ### Step 5: Read the configuration of a running node
 
@@ -284,17 +286,20 @@ yq 'select(.kind == "KubeNodeConfig")' build/worker-running.yaml
    Expected output (example):
 
    ```
+   patched MachineConfigs.config.talos.dev/v1alpha1 at the node 10.5.2.3
    Dry run summary:
    Applied configuration without a reboot (skipped in dry-run).
-
    Config diff:
 
    --- a
    +++ b
-   @@ ... @@
+   @@ -56,6 +56,8 @@
+    apiVersion: v1alpha1
     kind: KubeNodeConfig
-    labels:
+    nodeIP: {}
+   +labels:
    +    lab.example.com/tier: blue
+    ---
    ```
 
 2. Apply the patch:

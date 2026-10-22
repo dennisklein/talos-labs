@@ -45,7 +45,7 @@ configuration. Stage [02](../02-machine-config/README.md) is about the machine c
 | `trustd` | Control plane nodes only. Gives certificates to the other nodes (TCP port 50001). |
 | `containerd` | Runs the system containers (`apid`, `trustd`, `etcd`, ...). |
 | `cri` | A second containerd instance for Kubernetes pods. |
-| `sandboxd` | New in 1.14. Holds the namespaces in which `cri`, the kubelet and all pods run (workload isolation). |
+| `sandboxd` | New in 1.14. Holds the namespaces in which `cri`, the kubelet and all pods run (workload isolation). Not in container mode: Docker gives the isolation. You see it in the QEMU stages. |
 | `etcd` | Control plane nodes only. The Kubernetes database. |
 | `kubelet` | The Kubernetes node agent. |
 
@@ -189,10 +189,10 @@ KUBERNETES ENDPOINT   https://127.0.0.1:38611
 
 NODES:
 
-NAME                   TYPE           IP         CPU    RAM      DISK
-basic-controlplane-1   controlplane   10.5.1.2   2.00   2.1 GB   -
-basic-worker-1         worker         10.5.1.3   2.00   2.1 GB   -
-basic-worker-2         worker         10.5.1.4   2.00   2.1 GB   -
+NAME                    TYPE           IP         CPU    RAM      DISK
+/basic-controlplane-1   controlplane   10.5.1.2   2.00   2.1 GB   -
+/basic-worker-1         worker         10.5.1.3   2.00   2.1 GB   -
+/basic-worker-2         worker         10.5.1.4   2.00   2.1 GB   -
 ...
 NAME                   STATUS   ROLES           ...   INTERNAL-IP   ...   OS-IMAGE           ...
 basic-controlplane-1   Ready    control-plane   ...   10.5.1.2      ...   Talos (v1.14.4)    ...
@@ -273,7 +273,6 @@ NODE       SERVICE      STATE     HEALTH   LAST CHANGE   LAST EVENT
 10.5.1.2   etcd         Running   OK       3m ago        Health check successful
 10.5.1.2   kubelet      Running   OK       3m ago        Health check successful
 10.5.1.2   machined     Running   OK       3m ago        Health check successful
-10.5.1.2   sandboxd     Running   OK       3m ago        Health check successful
 10.5.1.2   trustd       Running   OK       3m ago        Health check successful
 ```
 
@@ -304,10 +303,12 @@ talosctl containers --namespace cri
 Expected output of the first command (example):
 
 ```
-NODE       NAMESPACE   ID       IMAGE                                        PID    STATUS
-10.5.1.2   system      apid     ghcr.io/siderolabs/apid:v1.14.4              1234   RUNNING
-10.5.1.2   system      trustd   ghcr.io/siderolabs/trustd:v1.14.4            1301   RUNNING
+NODE       NAMESPACE   ID       IMAGE   PID   STATUS
+10.5.1.2   system      apid             131   RUNNING
+10.5.1.2   system      trustd           130   RUNNING
 ```
+
+The `IMAGE` column is empty: `apid` and `trustd` come from the root file system of Talos, not from an image.
 
 In the `cri` namespace you see `kube-apiserver`, `kube-controller-manager`, `kube-scheduler` (static pods),
 `kube-proxy`, `kube-flannel` and `coredns`.
@@ -369,7 +370,7 @@ initial state.
    Expected output:
 
    ```
-   OCI runtime exec failed: exec failed: unable to start container process: exec: "/bin/sh": stat /bin/sh: no such file or directory: unknown
+   OCI runtime exec failed: exec failed: unable to start container process: exec: "/bin/sh": stat /bin/sh: no such file or directory
    ```
 
    The Talos image has no shell. There is nothing to log in to.
@@ -411,7 +412,7 @@ initial state.
 
    ```
    NODE       NAMESPACE   TYPE          ID             VERSION   TYPE
-   10.5.1.2   config      MachineType   machine-type   1         controlplane
+   10.5.1.2   config      MachineType   machine-type   2         controlplane
    10.5.1.3   config      MachineType   machine-type   1         worker
    10.5.1.4   config      MachineType   machine-type   1         worker
    ```
