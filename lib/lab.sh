@@ -97,6 +97,20 @@ firewalld_trust_bridge() {
   sudo -n firewall-cmd --zone=trusted --add-interface="$br" >/dev/null && echo "firewalld: $br is in the zone trusted"
 }
 
+# Docker sets the policy of the iptables chain FORWARD to DROP, which drops all traffic from the
+# VMs to the internet (the install cannot pull the installer image). Docker keeps the chain
+# DOCKER-USER for user rules: accept traffic from the QEMU bridges (talos*) and the replies to it.
+# The rules stay until the next reboot. Without Docker, do nothing.
+docker_allow_forward() {
+  sudo -n iptables -S DOCKER-USER >/dev/null 2>&1 || return 0
+  local rule
+  for rule in "-i talos+ -j ACCEPT" "-o talos+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"; do
+    # shellcheck disable=SC2086
+    sudo -n iptables -C DOCKER-USER $rule 2>/dev/null || sudo -n iptables -I DOCKER-USER $rule
+  done
+  echo "iptables: DOCKER-USER accepts traffic from and to talos+"
+}
+
 # Background jobs cannot ask for the sudo password (no terminal). Refresh the sudo timestamp each
 # minute while a long talosctl command runs, so that the jobs and the next sudo do not prompt.
 sudo_keepalive() { while sleep 60; do sudo -n -v || return 0; done; }
@@ -106,6 +120,7 @@ talos_up_qemu() {  # extra flags (--workers, --controlplanes, --disks, --presets
   mapfile -t patches < <(patch_flags)
   fresh_configs
   sudo -v
+  docker_allow_forward
   sudo_keepalive &
   local keepalive=$! rc=0
   firewalld_trust_bridge &
