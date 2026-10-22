@@ -170,10 +170,6 @@ k8s_previous_version() {
   curl -fsSL "https://dl.k8s.io/release/stable-1.$((minor - 1)).txt" | sed 's/^v//'
 }
 
-wait_k8s_api() {  # <kubeconfig>: wait until the API server answers
-  until kubectl --kubeconfig "$1" get --raw=/readyz >/dev/null 2>&1; do sleep 5; done
-}
-
 # CILIUM_VERSION if set, else the latest stable release, else (offline) the cilium-cli default.
 cilium_version() {
   if [ -n "${CILIUM_VERSION:-}" ]; then echo "$CILIUM_VERSION"; return; fi

@@ -10,7 +10,7 @@ run = [
   "cilium status --wait",
   "kubectl get nodes -o wide",
   "kubectl -n kube-system get daemonsets",
-  "echo 'Next: cilium connectivity test'",
+  "echo 'Next: cilium connectivity test --namespace-labels pod-security.kubernetes.io/enforce=privileged'",
 ]
 
 [tasks.down]

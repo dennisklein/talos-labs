@@ -29,25 +29,21 @@ Two documents of the control plane configuration make the default network:
 The file `patches/controlplane/no-flannel-no-kube-proxy.yaml` does both. These documents exist only in the
 control plane configuration. Thus, the `up` task gives the patch with `--config-patch-controlplanes`.
 
-### The boot sequence waits for a CNI
+### A cluster without a CNI
 
-Without a CNI, the kubelet reports `NotReady`. Talos and `talosctl cluster create` wait until all nodes are
-`Ready`. The API server is up in this time. Thus, you can install the CNI while the cluster waits:
+Without a CNI, the kubelet reports `NotReady`. `talosctl cluster create` and `talosctl health` read the
+resource `BootstrapManifestsConfig`. If its CNI is `none`, they skip the checks for `Ready` nodes, kube-proxy
+and CoreDNS (`SKIP`). Thus, the create command ends with `NotReady` nodes, and you install the CNI after it:
 
 ```
  time ----------------------------------------------------------------------------------->
 
- talosctl cluster create (background)
-   containers --> config --> bootstrap --> etcd, API server up --> wait for Ready nodes ...... done
-                                                 |                                     ^
- up task (foreground)                            |                                     |
-   wait for talosctl kubeconfig ----------------+                                     |
-   cilium install (values.yaml) ---> Cilium agents start ---> nodes Ready -------------+
+ talosctl cluster create
+   containers --> config --> bootstrap --> etcd, API server up --> checks (Ready: SKIP) --> done
+                                                                                            |
+ cilium install (values.yaml) <-------------------------------------------------------------+
+   Cilium agents start ---> CoreDNS starts ---> nodes Ready
 ```
-
-The `up` task gets a temporary kubeconfig with `talosctl kubeconfig`. Its server is the in-cluster endpoint
-`https://10.5.3.2:6443`. On Linux, the host reaches this address on the Docker bridge. When the create command
-ends, it writes the final kubeconfig (`https://127.0.0.1:<port>`) to `build/kubeconfig`.
 
 ### KubePrism
 
@@ -81,7 +77,7 @@ implements Services. Cilium needs the API server to start. KubePrism breaks this
 
 | Method | How | Note |
 |--------|-----|------|
-| CLI in the boot window | `cilium install` or `helm install` while the cluster waits | This stage. Simple, not declarative. |
+| CLI after the create | `cilium install` or `helm install` | This stage. Simple, not declarative. |
 | Inline manifest | `helm template` output in a `KubeInlineManifestConfig` document of the control plane | Declarative. Talos applies it at bootstrap and creates missing objects. It never updates or deletes them. |
 | External manifest | `KubeExternalManifestConfig` with a URL | The manifest has secret material. Host it only on a private server. |
 | Omni manifest sync | Omni applies the manifest | Only with Omni. |
@@ -107,7 +103,7 @@ configuration too large for this limit. Thus, this stage uses the CLI method.
 | File | Content |
 |------|---------|
 | `mise.toml` | `CLUSTER=cilium`, `SUBNET`, `TALOSCONFIG`, `KUBECONFIG`, tasks `check` and `down`. |
-| `mise-tasks/up` | Creates the cluster in the background and installs Cilium in the boot window. |
+| `mise-tasks/up` | Creates the cluster, then installs Cilium. |
 | `patches/controlplane/no-flannel-no-kube-proxy.yaml` | Deletes `KubeFlannelCNIConfig`, disables kube-proxy. |
 | `values.yaml` | The Cilium Helm values for Talos. |
 
@@ -126,22 +122,20 @@ The `up` task does these steps:
 ```
  //:preflight          docker info, Talos version
        |
- talos_up_docker &     talosctl cluster create docker --name cilium --workers 2
+ talos_up_docker       talosctl cluster create docker --name cilium --workers 2
        |                 --config-patch-controlplanes @patches/controlplane/no-flannel-no-kube-proxy.yaml
        |
- talosctl kubeconfig   repeat until the API server gives a kubeconfig (build/kubeconfig.boot)
-       |
  cilium_up             cilium install --version <latest stable> --values values.yaml
-       |
- wait                  cluster create ends when all nodes are Ready
        |
  mise run check        cilium status --wait; nodes; daemonsets
 ```
 
-While Cilium is not running, the create command shows lines like this (example):
+At the end, the create command shows these lines:
 
 ```
-waiting for all k8s nodes to report ready: some nodes are not ready: [cilium-controlplane-1 cilium-worker-1 cilium-worker-2]
+waiting for all k8s nodes to report ready: SKIP
+waiting for kube-proxy to report ready: SKIP
+waiting for coredns to report ready: SKIP
 ```
 
 Expected output at the end (example):
@@ -209,8 +203,12 @@ routing-mode               tunnel
 
 ### Step 5: Do the connectivity test
 
+Some test pods use host ports and extra capabilities. The Talos default Pod Security level is `baseline`
+(`KubeAdmissionControlConfig`). This level refuses host ports. The test does not label its namespaces. Thus,
+give the label `enforce: privileged` to all test namespaces:
+
 ```bash
-cilium connectivity test
+cilium connectivity test --namespace-labels pod-security.kubernetes.io/enforce=privileged
 ```
 
 The test takes some minutes. Expected output at the end:
@@ -219,14 +217,15 @@ The test takes some minutes. Expected output at the end:
 ✅ [cilium-test-1] All NN tests (MMM actions) successful, K tests skipped, 0 scenarios skipped.
 ```
 
-If the host has no direct internet access, skip the tests that go to the internet:
+The lines `Warning: would violate PodSecurity "restricted:latest"` are normal. The Talos default `warn` level
+is `restricted`, and the label changes only `enforce`.
+
+If the host has no direct internet access, also skip the tests that go to the internet:
 
 ```bash
-cilium connectivity test --test '!pod-to-world,!pod-to-cidr,!to-entities-world,!to-fqdns'
+cilium connectivity test --namespace-labels pod-security.kubernetes.io/enforce=privileged \
+  --test '!pod-to-world,!pod-to-cidr,!to-entities-world,!to-fqdns'
 ```
-
-The test namespace `cilium-test-1` has Pod Security `enforce: privileged`, set by the test. The Talos default
-for other namespaces is `baseline` (`KubeAdmissionControlConfig`).
 
 ## Experiments
 
@@ -331,18 +330,21 @@ This experiment does not change the cluster. It shows the size of an inline mani
    ```
 
    If the number is more than 131072 (128 KiB), the Docker provisioner cannot give this configuration to a node.
-   On QEMU and on real machines, there is no such limit, and the inline manifest is the recommended
+   The container stops at once, and `docker logs <container>` shows `exec /sbin/init: argument list too long`.
+   `talosctl cluster create` then stops with `panic: ParseAddr("invalid IP")`. A patch of 90 KB is sufficient
+   to cause this, because base64 makes the data 4/3 larger. On QEMU and on real machines, there is no such limit, and the inline manifest is the recommended
    production method.
 
 ## Troubleshooting
 
 | Symptom | Cause | Remedy |
 |---------|-------|--------|
-| The `up` task waits a long time at `talosctl kubeconfig`. | The control plane is not up yet, or the bootstrap failed. | In a second terminal: `talosctl -n 10.5.3.2 dmesg -f` and `talosctl -n 10.5.3.2 services`. |
+| `cluster create` stops with `panic: ParseAddr("invalid IP")`. `docker logs cilium-controlplane-1` shows `exec /sbin/init: argument list too long`. | The machine configuration is more than 128 KiB in base64 (for example, an inline manifest). | Make the patch smaller. Use the CLI method, or a QEMU cluster for inline manifests (experiment 4). |
 | `cluster create` waits at `waiting for apid to be ready` with `connection refused` from a worker. | The patch is in `patches/`, not in `patches/controlplane/`. A worker refuses `KubeProxyConfig`: `the following document kinds are only allowed on control plane machines`. | Keep the patch in `patches/controlplane/`. `docker logs cilium-worker-1` shows the error. |
-| `cluster create` fails after 20 minutes, `nodes are not ready`. | Cilium did not start (for example, no image pull). | `kubectl --kubeconfig build/kubeconfig.boot -n kube-system get pods`, then the agent logs. |
+| `cilium status --wait` does not end. The pods stay `Pending` or `ContainerCreating`. | Cilium did not start (for example, no image pull). | `kubectl -n kube-system get pods -o wide`, `kubectl -n kube-system describe pod <name>`, then the agent logs. |
 | The agents fail with `operation not permitted` for a module. | A value list has `SYS_MODULE`, or a Cilium function needs a module that the host kernel does not have. | Use `values.yaml` as it is. In Docker, the host kernel must have the module. |
 | CoreDNS does not answer when `bpf.masquerade: true`. | Known issue with the Talos host DNS forwarding (`forwardKubeDNSToHost`). | Do not set `bpf.masquerade`, or set `forwardKubeDNSToHost: false` in `ResolverConfig.hostDNS`. |
+| The connectivity test stops with `timeout reached waiting for deployment cilium-test-1/client to become ready (last error: replicas count is zero)`. | The API server refused the test pods. Usually Pod Security. | Use `--namespace-labels` (see step 5). `kubectl -n cilium-test-1 get events --field-selector type=Warning` shows the reason. Delete the test namespaces before the next run: `kubectl get ns -o name | grep cilium-test | xargs kubectl delete`. |
 | The connectivity test fails for *world* tests. | The host has no direct internet access. | Skip the world tests (see step 5). |
 
 ## Clean up
