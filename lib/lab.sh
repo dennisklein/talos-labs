@@ -94,18 +94,28 @@ firewalld_trust_bridge() {
     sleep 1
   done
   [ -n "$br" ] || { echo "firewalld: no bridge with ${gw%/} after ${i}s" >&2; return 0; }
-  sudo firewall-cmd --zone=trusted --add-interface="$br" >/dev/null && echo "firewalld: $br is in the zone trusted"
+  sudo -n firewall-cmd --zone=trusted --add-interface="$br" >/dev/null && echo "firewalld: $br is in the zone trusted"
 }
+
+# Background jobs cannot ask for the sudo password (no terminal). Refresh the sudo timestamp each
+# minute while a long talosctl command runs, so that the jobs and the next sudo do not prompt.
+sudo_keepalive() { while sleep 60; do sudo -n -v || return 0; done; }
 
 talos_up_qemu() {  # extra flags (--workers, --controlplanes, --disks, --presets, ...) are passed through
   local patches
   mapfile -t patches < <(patch_flags)
   fresh_configs
+  sudo -v
+  sudo_keepalive &
+  local keepalive=$! rc=0
   firewalld_trust_bridge &
+  local firewall=$!
   sudo_talosctl cluster create qemu --name "$CLUSTER" --cidr "$SUBNET" --state "$(state_dir)" \
     --talosconfig-destination "$TALOSCONFIG" --talos-version "$(talos_version)" \
-    "${patches[@]}" "$@"
-  wait
+    "${patches[@]}" "$@" || rc=$?
+  kill "$keepalive" 2>/dev/null || true
+  [ "$rc" -eq 0 ] || { kill "$firewall" 2>/dev/null; return "$rc"; }
+  wait "$firewall" || true
   own_configs
   talosctl config node "$(node_ip 1)"
 }
