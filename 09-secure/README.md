@@ -73,8 +73,8 @@ request to apid on the node:
  talosctl (host 10.5.9.1) --(1)--> apid on 10.5.9.2 (endpoint) --(2)--> apid on 10.5.9.3 (node)
 ```
 
-A firewall rule for port 50000 on the node must allow connection (2), from the endpoint. This is the trap of
-experiment 1.
+A firewall rule for port 50000 on the node must allow connection (2), from the endpoint. The node sees the
+endpoint as the source, not the host. Experiment 1 shows this.
 
 ### Ingress firewall
 
@@ -101,7 +101,7 @@ policies for that.
 | `mise.toml` | `CLUSTER=secure`, `SUBNET`, `TALOSCONFIG`, `KUBECONFIG`, tasks `up`, `check` and `down`. |
 | `examples/firewall-controlplane.yaml` | Firewall for the control plane node (recommended rules, Flannel VXLAN). |
 | `examples/firewall-worker.yaml` | Firewall for the worker. The kubelet port is closed for the host. |
-| `examples/firewall-lockout.yaml` | A wrong rule: apid only from the host. For experiment 1, in `try` mode only. |
+| `examples/firewall-lockout.yaml` | A dangerous rule: apid only from the control plane node. For experiment 1, in `try` mode only. |
 
 ## Procedure
 
@@ -300,7 +300,10 @@ Do the experiments after the procedure, in the sequence below.
 
 ### Experiment 1: Lock yourself out, safely
 
-1. Apply the wrong rule on the worker in `try` mode for 1 minute:
+The rule in `examples/firewall-lockout.yaml` allows apid on the worker only from the control plane node,
+10.5.9.2. It looks correct, because `talosctl` uses the control plane node as its endpoint.
+
+1. Apply the rule on the worker in `try` mode for 1 minute:
 
    ```bash
    cat examples/firewall-lockout.yaml
@@ -313,17 +316,22 @@ Do the experiments after the procedure, in the sequence below.
    talosctl -n 10.5.9.3 version
    ```
 
-   The command fails after a timeout: the worker blocks the forwarded request from 10.5.9.2.
+   The command works: apid on 10.5.9.2 forwards the request, and the worker allows 10.5.9.2.
 
 3. Try the worker directly (the worker is the endpoint):
 
    ```bash
-   talosctl -e 10.5.9.3 -n 10.5.9.3 version
+   timeout 20 talosctl -e 10.5.9.3 -n 10.5.9.3 version
    ```
 
-   The command works: the request comes from the host, 10.5.9.1.
+   The command fails: the request comes from the host, 10.5.9.1, and the worker drops it. If the control
+   plane node is down, you cannot reach the worker at all.
 
-4. Wait 1 minute. Talos reverts the change. Step 2 works again.
+4. Wait 1 minute. Talos reverts the change. Step 3 works again.
+
+The opposite rule (apid only from the host, 10.5.9.1/32) is also wrong: it blocks the forwarded requests.
+But you do not see this at once. The firewall always allows established connections, and apid on the
+control plane node keeps its connection to the worker open. A new rule does not close an open connection.
 
 ### Experiment 2: Close the kubelet port for the host
 
@@ -420,7 +428,7 @@ Do the experiments after the procedure, in the sequence below.
 | `bootstrap error ... timeout`. The console log (`build/state/secure/secure-controlplane-1.log`) shows `PCR bank 7 is populated with all zeroes`, then maintenance mode. | The firmware puts no measurements into the TPM (Fedora 2 MB build `OVMF_CODE.secboot.fd`). | The `up` task converts the 4 MB build to `/usr/share/ovmf` (needs `qemu-img`). Run `mise run down`, then `mise run up`. |
 | `cluster create` fails: no Secure Boot firmware. | No OVMF file with Secure Boot support. | Install `ovmf` (Debian, Ubuntu) or `edk2-ovmf` (Fedora). The file is `OVMF_CODE_4M.secboot.fd` or similar. |
 | The VM stops with `Access Denied` or `Security Violation`. | The firmware has keys that do not match, or setup mode was off. | `mise run down` deletes the firmware variables. Start again. |
-| Step 2 of experiment 1 never works again. | The patch was applied without `--mode try`. | Use the direct path to the worker: `talosctl -e 10.5.9.3 -n 10.5.9.3 edit mc`, and correct the subnet of `apid-ingress`. |
+| Step 3 of experiment 1 never works again. | The patch was applied without `--mode try`. | Use the path through the control plane node: `talosctl -n 10.5.9.3 edit mc`, and correct the subnet of `apid-ingress`. |
 | `nodes are not set for the command`. | `config new` does not copy the nodes. | `talosctl --talosconfig <file> config node 10.5.9.2`, or use `-n`. |
 | `config new` fails with `PermissionDenied`. | The current client is not `os:admin`. | Use `build/talosconfig`. |
 | Pods on different nodes cannot connect after the firewall change. | VXLAN (UDP 4789) is blocked. | Keep the rule `cni-vxlan`. With Cilium, the port is 8472. |
