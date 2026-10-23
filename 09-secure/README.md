@@ -118,9 +118,18 @@ The task downloads the Secure Boot ISO from the Image Factory. Expected output o
 end (example):
 
 ```
-NODE       NAMESPACE   TYPE            ID              VERSION   SECUREBOOT   UKISIGNINGKEYFINGERPRINT   PCRSIGNINGKEYFINGERPRINT   SELINUXSTATE   MODULESIGNATUREENFORCED
-10.5.9.2   runtime     SecurityState   securitystate   1         true         2ba4...                    c1d0...                    permissive     true
-10.5.9.3   runtime     SecurityState   securitystate   1         true         2ba4...                    c1d0...                    permissive     true
+NODE       NAMESPACE   TYPE            ID              VERSION   SECUREBOOT   UKISIGNINGKEYFINGERPRINT   PCRSIGNINGKEYFINGERPRINT   SELINUXSTATE          MODULESIGNATUREENFORCED
+10.5.9.2   runtime     SecurityState   securitystate   1         true                                    9C:42:05:91:48:E1:...      enabled, permissive   true
+10.5.9.3   runtime     SecurityState   securitystate   1         true                                    9C:42:05:91:48:E1:...      enabled, permissive   true
+```
+
+The PCR signing key fingerprint identifies the key that signs the PCR 11 policy of the Talos UKI (Sidero
+Labs). The firmware log (`build/state/secure/secure-controlplane-1.log`) shows the key enrollment at the
+first boot:
+
+```
+Enrolling secure boot keys from directory: \loader\keys\auto
+Custom Secure Boot keys successfully enrolled, rebooting the system now!
 ```
 
 ### Step 2: Examine the boot chain
@@ -141,7 +150,21 @@ NODE       NAMESPACE   TYPE            ID              VERSION   SECUREBOOT   UK
    talosctl get machineconfig v1alpha1 -o jsonpath='{.spec}' | yq 'select(.kind == "UnattendedInstallConfig") | .installer.image'
    ```
 
-   The image name is `factory.talos.dev/metal-installer-secureboot/...`.
+   Expected output:
+
+   ```
+   factory.talos.dev/metal-installer-secureboot/376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba:v1.14.4
+   ```
+
+3. Show the volume configuration that the preset adds:
+
+   ```bash
+   talosctl get machineconfig v1alpha1 -o jsonpath='{.spec}' | yq 'select(.kind == "VolumeConfig") | {"name": .name, "keys": .encryption.keys}'
+   ```
+
+   Both volumes have one key slot with `tpm` and `checkSecurebootStatusOnEnroll: true`: Talos seals a key
+   only if Secure Boot is on. EPHEMERAL also has `lockToState: true`: its key also depends on a random salt
+   in STATE. An EPHEMERAL partition without its STATE partition does not open.
 
 ### Step 3: Examine the disk encryption
 
@@ -151,8 +174,27 @@ talosctl get volumestatus STATE -o yaml | yq '.spec | {"phase": .phase, "encrypt
 talosctl get volumestatus EPHEMERAL -o yaml | yq '.spec.encryptionProvider'
 ```
 
+Expected output:
+
+```
+NODE       NAMESPACE   TYPE               ID      VERSION   TYPE        SIZE     DISCOVERED   LABEL       PARTITIONLABEL
+10.5.9.2   runtime     DiscoveredVolume   vda3    1         partition   105 MB   luks                     STATE
+10.5.9.2   runtime     DiscoveredVolume   vda4    1         partition   8.4 GB   luks                     EPHEMERAL
+phase: ready
+encryptionProvider: luks2
+configuredEncryptionKeys:
+  - tpm
+tpmEncryptionOptions:
+  pcrs:
+    - 7
+  pubKeyPcrs:
+    - 11
+luks2
+```
+
 - STATE and EPHEMERAL show the file system type `luks` on the disk.
-- The encryption provider is `luks2`. The key slot uses the TPM.
+- The key of STATE is sealed to the value of PCR 7 (`pcrs`) and to a PCR 11 policy that the PCR signing key
+  signs (`pubKeyPcrs`). See [TPM disk encryption](#tpm-disk-encryption).
 
 ### Step 4: Make clients with less rights
 
@@ -164,13 +206,25 @@ talosctl get volumestatus EPHEMERAL -o yaml | yq '.spec.encryptionProvider'
 
    Expected output (part): `Roles: os:admin`.
 
-2. Make three new client configurations. Each certificate is valid for one hour:
+2. Make three new client configurations. Each certificate is valid for one hour. `config new` copies the
+   endpoints, but not the nodes. Thus, set the node in each file:
 
    ```bash
    talosctl config new build/reader.talosconfig   --roles os:reader      --crt-ttl 1h
    talosctl config new build/operator.talosconfig --roles os:operator    --crt-ttl 1h
    talosctl config new build/backup.talosconfig   --roles os:etcd:backup --crt-ttl 1h
+   for r in reader operator backup; do talosctl --talosconfig build/$r.talosconfig config node 10.5.9.2; done
    talosctl --talosconfig build/reader.talosconfig config info
+   ```
+
+   Expected output of `config info`:
+
+   ```
+   Current context:     reader@secure
+   Nodes:               10.5.9.2
+   Endpoints:           10.5.9.2
+   Roles:               os:reader
+   Certificate expires: 59 minutes from now (...)
    ```
 
 3. Try the reader:
@@ -184,10 +238,12 @@ talosctl get volumestatus EPHEMERAL -o yaml | yq '.spec.encryptionProvider'
    $R -n 10.5.9.3 reboot                           # fails: PermissionDenied
    ```
 
+   A call that the role does not permit fails with `rpc error: code = PermissionDenied desc = not authorized`.
+
 4. Try the operator and the backup client:
 
    ```bash
-   talosctl --talosconfig build/operator.talosconfig -n 10.5.9.3 service kubelet restart      # works
+   talosctl --talosconfig build/operator.talosconfig -n 10.5.9.3 service kubelet restart      # works: Service "kubelet" restarted
    talosctl --talosconfig build/operator.talosconfig read /etc/os-release                     # fails
    talosctl --talosconfig build/backup.talosconfig etcd snapshot build/etcd.snapshot           # works
    talosctl --talosconfig build/backup.talosconfig get members                                # fails
@@ -213,8 +269,19 @@ talosctl get volumestatus EPHEMERAL -o yaml | yq '.spec.encryptionProvider'
    talosctl -n 10.5.9.2 version
    kubectl get nodes
    kubectl -n kube-system logs -l k8s-app=kube-dns --tail 1
-   talosctl -n 10.5.9.2 get nftableschain ingress -o yaml | yq .spec.rules
+   talosctl -n 10.5.9.2 get nftableschains
    ```
+
+   Expected output of the last command:
+
+   ```
+   NODE       NAMESPACE   TYPE            ID           VERSION   TYPE     HOOK         PRIORITY                      POLICY
+   10.5.9.2   network     NfTablesChain   ingress      1         filter   input        NfTablesChainPriority(-140)   drop
+   10.5.9.2   network     NfTablesChain   prerouting   1         filter   prerouting   NfTablesChainPriority(-110)   accept
+   ```
+
+   The chain `ingress` has the policy `drop`. Show its rules with
+   `talosctl -n 10.5.9.2 get nftableschain ingress -o yaml | yq .spec.rules`.
 
 4. If all commands work, apply the rules permanently:
 
@@ -222,7 +289,10 @@ talosctl get volumestatus EPHEMERAL -o yaml | yq '.spec.encryptionProvider'
    talosctl -n 10.5.9.2 patch mc -p @examples/firewall-controlplane.yaml
    ```
 
-   If the `try` timeout ended before this step, the patch applies the same rules again. That is correct.
+   In the `try` window, the output is `Apply was skipped: no changes detected.` The message is not correct:
+   `talosctl` compares the patch with the running configuration (the `try` configuration), prints the
+   message, but it sends the configuration before that. The node saves it and cancels the revert.
+   If the `try` timeout ended before this step, the patch applies the same rules again.
 
 ## Experiments
 
@@ -263,19 +333,22 @@ Do the experiments after the procedure, in the sequence below.
    nc -zv -w 2 10.5.9.3 10250
    ```
 
-   Expected output: `Connection to 10.5.9.3 10250 port [tcp/*] succeeded!`
+   Expected output: `Connection to 10.5.9.3 10250 port [tcp/*] succeeded!` (OpenBSD `nc`, Debian and
+   Ubuntu) or `Ncat: Connected to 10.5.9.3:10250.` (Ncat, Fedora).
 
 2. Apply the worker rules in `try` mode, then check:
 
    ```bash
    talosctl -n 10.5.9.3 patch mc --mode try --timeout 3m -p @examples/firewall-worker.yaml
-   nc -zv -w 2 10.5.9.3 10250                                   # times out
+   nc -zv -w 2 10.5.9.3 10250                                   # times out (Ncat: TIMEOUT.)
    kubectl run probe --image=busybox:1.37 --restart=Never --overrides='{"spec":{"nodeName":"secure-worker-1"}}' -- sh -c 'echo hello'
    kubectl logs probe                                           # works: the API server (10.5.9.2) connects to the kubelet
    kubectl delete pod probe
    ```
 
-   The host cannot reach the kubelet, but the API server can.
+   The host cannot reach the kubelet, but the API server can: `kubectl logs probe` shows `hello`.
+   `kubectl run` shows a warning that the pod violates the Pod Security level `restricted`. This is only a
+   warning: the default level `baseline` permits the pod.
 
 3. Wait 3 minutes for the revert, or apply the rules permanently:
 
@@ -292,11 +365,33 @@ Do the experiments after the procedure, in the sequence below.
    talosctl -n 10.5.9.3 get volumestatuses | grep -E 'NODE|STATE|EPHEMERAL'
    ```
 
+   `reboot` waits until the node is back. Its last lines are `events check condition met` and
+   `post check passed`. Expected output of `get volumestatuses`:
+
+   ```
+   NODE       NAMESPACE   TYPE           ID          VERSION   TYPE        PHASE   LOCATION    SIZE
+   10.5.9.3   runtime     VolumeStatus   EPHEMERAL   3         partition   ready   /dev/vda4   8.4 GB
+   10.5.9.3   runtime     VolumeStatus   STATE       6         partition   ready   /dev/vda3   105 MB
+   ```
+
 2. Read the boot log of the worker for the TPM unlock:
 
    ```bash
-   talosctl -n 10.5.9.3 dmesg | grep -i -E 'tpm|luks|unseal' | head
+   talosctl -n 10.5.9.3 dmesg | grep -E 'opened encrypted device|TPM is'
    ```
+
+   Expected output (shortened):
+
+   ```
+   [talos] TPM is ready for disk encryption operations (if available)
+   [talos] opened encrypted device {..., "volume": "STATE", "slot": 0, "type": "*keys.TPMKeyHandler"}
+   [talos] opened encrypted device {..., "volume": "EPHEMERAL", "slot": 0, "type": "*keys.SaltedHandler"}
+   [talos] TPM is locked to block any disk encryption operation (if available)
+   ```
+
+   - The TPM unseals the key of STATE. EPHEMERAL uses the TPM key together with the salt from STATE
+     (`lockToState`).
+   - After the volumes are open, Talos locks the TPM: a process that runs later cannot unseal the keys.
 
 ### Experiment 4: An expired client certificate
 
@@ -304,6 +399,7 @@ Do the experiments after the procedure, in the sequence below.
 
    ```bash
    talosctl config new build/short.talosconfig --roles os:reader --crt-ttl 1m
+   talosctl --talosconfig build/short.talosconfig config node 10.5.9.2
    talosctl --talosconfig build/short.talosconfig get members
    ```
 
@@ -325,6 +421,7 @@ Do the experiments after the procedure, in the sequence below.
 | `cluster create` fails: no Secure Boot firmware. | No OVMF file with Secure Boot support. | Install `ovmf` (Debian, Ubuntu) or `edk2-ovmf` (Fedora). The file is `OVMF_CODE_4M.secboot.fd` or similar. |
 | The VM stops with `Access Denied` or `Security Violation`. | The firmware has keys that do not match, or setup mode was off. | `mise run down` deletes the firmware variables. Start again. |
 | Step 2 of experiment 1 never works again. | The patch was applied without `--mode try`. | Use the direct path to the worker: `talosctl -e 10.5.9.3 -n 10.5.9.3 edit mc`, and correct the subnet of `apid-ingress`. |
+| `nodes are not set for the command`. | `config new` does not copy the nodes. | `talosctl --talosconfig <file> config node 10.5.9.2`, or use `-n`. |
 | `config new` fails with `PermissionDenied`. | The current client is not `os:admin`. | Use `build/talosconfig`. |
 | Pods on different nodes cannot connect after the firewall change. | VXLAN (UDP 4789) is blocked. | Keep the rule `cni-vxlan`. With Cilium, the port is 8472. |
 
