@@ -17,7 +17,7 @@ When you complete this stage, you know:
 - How Talos sends cluster traffic into the tunnel: nftables mark, routing rule, routing table 180.
 - What `advertiseKubernetesNetworks` changes.
 - Why KubeSpan does not work without discovery.
-- When a peer is `down`, and what happens to its traffic.
+- When a peer is not `up` (`unknown` or `down`), and what happens to its traffic.
 
 ## Concepts
 
@@ -438,9 +438,10 @@ format. `tcpdump` on the host reads and filters them.
 
 ### Experiment 4: A peer goes down
 
-A peer is `down` when its last WireGuard handshake is older than 275 seconds. By default
-(`allowDownPeerBypass: false`), its traffic still goes into the tunnel and stops. Talos never sends it
-unencrypted.
+A peer is not `up` when its last WireGuard handshake is older than 275 seconds. Then KubeSpan tries the
+next endpoint of the peer. After each try, the state is `unknown` for 15 seconds, then `down`, then KubeSpan
+tries again. Thus, a peer that does not answer shows mostly `unknown`. By default (`allowDownPeerBypass: false`),
+its traffic still goes into the tunnel and stops. Talos never sends it unencrypted.
 
 1. Freeze the VM of `kubespan-worker-2` with the QEMU monitor:
 
@@ -449,14 +450,22 @@ unencrypted.
    ```
 
 2. Watch the peer status on the control plane node. Stop the watch with `Ctrl+C` when the state of
-   `kubespan-worker-2` is `down` (after approximately 5 minutes):
+   `kubespan-worker-2` is not `up` (after approximately 5 minutes):
 
    ```bash
    talosctl -n 10.5.4.2 get kubespanpeerstatuses --watch
    ```
 
-   The `RX` counter of `kubespan-worker-2` stops. `kubectl get nodes` shows `kubespan-worker-2` as `NotReady`
-   after approximately 40 seconds, much earlier than KubeSpan.
+   The `RX` counter of `kubespan-worker-2` stops. Expected output after 10 minutes (part):
+
+   ```
+   NODE       NAMESPACE   TYPE                 ID      VERSION   LABEL               ENDPOINT         STATE     RX       TX
+   10.5.4.2   kubespan    KubeSpanPeerStatus   O4Cq…   24        kubespan-worker-1   10.5.4.3:51820   up        134780   172212
+   10.5.4.2   kubespan    KubeSpanPeerStatus   ZKXj…   24        kubespan-worker-2   10.5.4.4:51820   unknown   408484   824916
+   ```
+
+   `kubectl get nodes` shows `kubespan-worker-2` as `NotReady` after approximately 40 seconds, much earlier
+   than KubeSpan.
 
 3. Show that the address of the peer is still routed into the tunnel:
 
@@ -464,9 +473,10 @@ unencrypted.
    talosctl -n 10.5.4.2 get nftableschains kubespan_outgoing -o yaml | grep -c 10.5.4.4
    ```
 
-   The result is not `0`.
+   The result is not `0` (in the test: `2`).
 
-4. Continue the VM. After the next handshake, the state is `up` again:
+4. Continue the VM. After the next handshake (approximately 10 seconds), the state is `up` again, and the
+   node is `Ready`:
 
    ```bash
    echo cont | sudo socat - UNIX-CONNECT:build/state/kubespan/kubespan-worker-2.monitor
