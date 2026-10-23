@@ -8,7 +8,7 @@ KUBECONFIG = "{{config_root}}/build/kubeconfig"
 description = "QEMU cluster with UEFI Secure Boot, a TPM 2.0 and TPM-encrypted STATE and EPHEMERAL"
 depends = ["//:preflight-qemu"]
 shell = "bash -c"
-run = "source $LAB_ROOT/lib/lab.sh; talos_up_qemu --workers 1 --presets iso-secureboot; mise run check"
+run = "source $LAB_ROOT/lib/lab.sh; ovmf_tpm_firmware; talos_up_qemu --workers 1 --presets iso-secureboot; mise run check"
 
 [tasks.check]
 description = "Show the Secure Boot state and the encryption of the system volumes"

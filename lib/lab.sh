@@ -111,6 +111,20 @@ docker_allow_forward() {
   echo "iptables: DOCKER-USER accepts traffic from and to talos+"
 }
 
+# talosctl takes the first Secure Boot firmware it finds. On Fedora, this is the 2 MB build
+# /usr/share/OVMF/OVMF_CODE.secboot.fd, which puts no measurements into the TPM: PCR 7 stays zero and
+# Talos cannot seal the disk keys. Fedora has the 4 MB build only as qcow2. Convert it to raw files in
+# /usr/share/ovmf, the first folder that talosctl searches. Other distributions have a raw 4 MB build.
+ovmf_tpm_firmware() {
+  local src=/usr/share/edk2/ovmf dst=/usr/share/ovmf
+  [ -e "$dst/OVMF_CODE_4M.secboot.fd" ] && return 0
+  [ -e "$src/OVMF_CODE_4M.secboot.qcow2" ] || return 0
+  sudo mkdir -p "$dst"
+  sudo qemu-img convert -f qcow2 -O raw "$src/OVMF_CODE_4M.secboot.qcow2" "$dst/OVMF_CODE_4M.secboot.fd"
+  sudo qemu-img convert -f qcow2 -O raw "$src/OVMF_VARS_4M.qcow2" "$dst/OVMF_VARS_4M.fd"
+  echo "ovmf: raw 4 MB Secure Boot firmware in $dst"
+}
+
 # Background jobs cannot ask for the sudo password (no terminal). Refresh the sudo timestamp each
 # minute while a long talosctl command runs, so that the jobs and the next sudo do not prompt.
 sudo_keepalive() { while sleep 60; do sudo -n -v || return 0; done; }

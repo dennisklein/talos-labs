@@ -134,7 +134,7 @@ Other useful commands:
 |------|----------------|--------|------|
 | KVM | `/dev/kvm` | `/dev/kvm` | Enable virtualization in the firmware. In a VM, enable nested virtualization. |
 | QEMU | `qemu-system-x86 qemu-kvm` | `qemu-kvm` | `qemu-system-x86_64` must be in `PATH`. |
-| UEFI firmware | `ovmf` | `edk2-ovmf` | Stage 09 needs the Secure Boot variant (`OVMF_CODE*.secboot.fd`). |
+| UEFI firmware | `ovmf` | `edk2-ovmf`, `qemu-img` | Stage 09 needs the 4 MB Secure Boot build with TPM support (`OVMF_CODE_4M.secboot.fd`). On Fedora, the `up` task of stage 09 makes it from the qcow2 file with `qemu-img`, in `/usr/share/ovmf`. |
 | Software TPM | `swtpm swtpm-tools` | `swtpm swtpm-tools` | Stage 09. |
 | iptables | `iptables` | `iptables` | The CNI plugins of the provisioner use it. |
 | firewalld | | | If firewalld is active, it rejects DHCP from the VMs on the new bridge. The `up` tasks put the bridge into the zone `trusted` (runtime only, until the next reload). |

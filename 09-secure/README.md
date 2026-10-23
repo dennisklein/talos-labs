@@ -321,6 +321,7 @@ Do the experiments after the procedure, in the sequence below.
 | Symptom | Cause | Remedy |
 |---------|-------|--------|
 | `cluster create` fails: `swtpm` not found. | The software TPM is not installed. | Install `swtpm` (Debian, Ubuntu: `swtpm swtpm-tools`). |
+| `bootstrap error ... timeout`. The console log (`build/state/secure/secure-controlplane-1.log`) shows `PCR bank 7 is populated with all zeroes`, then maintenance mode. | The firmware puts no measurements into the TPM (Fedora 2 MB build `OVMF_CODE.secboot.fd`). | The `up` task converts the 4 MB build to `/usr/share/ovmf` (needs `qemu-img`). Run `mise run down`, then `mise run up`. |
 | `cluster create` fails: no Secure Boot firmware. | No OVMF file with Secure Boot support. | Install `ovmf` (Debian, Ubuntu) or `edk2-ovmf` (Fedora). The file is `OVMF_CODE_4M.secboot.fd` or similar. |
 | The VM stops with `Access Denied` or `Security Violation`. | The firmware has keys that do not match, or setup mode was off. | `mise run down` deletes the firmware variables. Start again. |
 | Step 2 of experiment 1 never works again. | The patch was applied without `--mode try`. | Use the direct path to the worker: `talosctl -e 10.5.9.3 -n 10.5.9.3 edit mc`, and correct the subnet of `apid-ingress`. |
