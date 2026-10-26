@@ -249,6 +249,10 @@ luks2
    talosctl --talosconfig build/backup.talosconfig get members                                # fails
    ```
 
+   The snapshot of the backup client works: `etcd snapshot saved to "build/etcd.snapshot" (1151008 bytes)`.
+   `get members` fails already at the version check: `error getting server version: ... PermissionDenied`.
+   The role `os:etcd:backup` permits nothing else.
+
 ### Step 5: Enable the firewall on the control plane node
 
 1. Show the rules:
@@ -324,8 +328,9 @@ The rule in `examples/firewall-lockout.yaml` allows apid on the worker only from
    timeout 20 talosctl -e 10.5.9.3 -n 10.5.9.3 version
    ```
 
-   The command fails: the request comes from the host, 10.5.9.1, and the worker drops it. If the control
-   plane node is down, you cannot reach the worker at all.
+   The command prints the client version and then waits: the request comes from the host, 10.5.9.1, and
+   the worker drops it without an answer. `timeout` stops it after 20 seconds. If the control plane node is
+   down, you cannot reach the worker at all.
 
 4. Wait 1 minute. Talos reverts the change. Step 3 works again.
 
@@ -417,8 +422,13 @@ control plane node keeps its connection to the worker open. A new rule does not 
    talosctl --talosconfig build/short.talosconfig get members
    ```
 
-   The command fails with a TLS error: the certificate expired. Short certificates limit the damage of a lost
-   `talosconfig` file.
+   The command fails: the node refuses the expired client certificate.
+
+   ```
+   10.5.9.2: error getting server version: rpc error: code = Unavailable desc = connection error: desc = "error reading server preface: remote error: tls: expired certificate"
+   ```
+
+   Short certificates limit the damage of a lost `talosconfig` file.
 
 ## Troubleshooting
 
