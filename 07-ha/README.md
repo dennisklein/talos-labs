@@ -273,6 +273,17 @@ Do the experiments after the procedure, in the sequence below.
 
    The node does not take the VIP back. There is no reason to move it again.
 
+6. The clock of the VM stopped during the freeze. Thus, it is behind by the freeze time. Until Talos
+   corrects the clock, requests through this node fail with
+   `x509: certificate has expired or is not yet valid: current time ... is before ...`: the node sees the
+   certificates of the other nodes as not valid yet. Watch the time of the node through another endpoint:
+
+   ```bash
+   talosctl -e 10.5.7.2 -n 10.5.7.3 time
+   ```
+
+   Continue with experiment 3 when the time is correct.
+
 ### Experiment 3: etcd maintenance
 
 1. Take a snapshot:
@@ -349,13 +360,17 @@ Do the experiments after the procedure, in the sequence below.
    kubectl create configmap after-snapshot --from-literal=note=lost
    ```
 
-2. Destroy etcd on all control plane nodes. Wipe the EPHEMERAL partition (it contains `/var/lib/etcd`):
+2. Destroy etcd on all control plane nodes at the same time. Wipe the EPHEMERAL partition (it contains
+   `/var/lib/etcd`). Each node is its own endpoint, and `--wait=false` does not wait for the node:
 
    ```bash
    for n in 10.5.7.2 10.5.7.3 10.5.7.4; do
-     talosctl -n "$n" reset --graceful=false --reboot --system-labels-to-wipe=EPHEMERAL
+     talosctl -e "$n" -n "$n" reset --graceful=false --reboot --system-labels-to-wipe=EPHEMERAL --wait=false
    done
    ```
+
+   Do not reset the nodes one after the other with `--wait`. Then two members always remain, and each node
+   joins the cluster again as a new member: the quorum is never lost, and the data stays.
 
 3. Wait until etcd is `Preparing` on all three nodes:
 
@@ -402,7 +417,8 @@ Do the experiments after the procedure, in the sequence below.
 | `kubectl --server https://10.5.7.50:6443` fails with `x509: certificate is valid for ...`. | The VIP is not in `certExtraSANs`. | Check `patches/controlplane/vip.yaml`. The API server gets a new certificate after the patch. |
 | The VMs do not start: `cannot allocate memory`. | Not enough RAM on the host. | The stage needs about 8 GiB free. Close other stages (`mise run down-all`). |
 | `etcd snapshot` fails. | No quorum. | Copy the database file: `talosctl -n <node> cp /var/lib/etcd/member/snap/db build/`, then recover with `--recover-skip-hash-check`. |
-| `bootstrap --recover-from` fails with `etcd is not in Preparing state`. | A node still has etcd data. | Wipe EPHEMERAL on that node too (step 2 of experiment 5). |
+| `bootstrap --recover-from` fails with `etcd data directory is not empty`. | etcd runs with data: the nodes were reset one after the other, and the quorum was never lost. | Reset all three nodes at the same time (step 2 of experiment 5). |
+| After a freeze, requests fail with `x509: certificate has expired or is not yet valid`. | The clock of the frozen VM is behind. | Wait until Talos corrects the time (`talosctl -e 10.5.7.2 -n <node> time`), or use another endpoint (`-e`). |
 | `socat: command not found`. | `socat` is not installed on the host. | Install `socat`. |
 
 ## Clean up
