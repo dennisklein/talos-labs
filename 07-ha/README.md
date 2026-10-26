@@ -274,12 +274,25 @@ Do the experiments after the procedure, in the sequence below.
    The node does not take the VIP back. There is no reason to move it again.
 
 6. The clock of the VM stopped during the freeze. Thus, it is behind by the freeze time. Until Talos
-   corrects the clock, requests through this node fail with
-   `x509: certificate has expired or is not yet valid: current time ... is before ...`: the node sees the
-   certificates of the other nodes as not valid yet. Watch the time of the node through another endpoint:
+   corrects the clock, the TLS connections to and from this node fail:
+
+   - Requests to the node: `remote error: tls: expired certificate`.
+   - Requests through the node (it is the endpoint):
+     `x509: certificate has expired or is not yet valid: current time ... is before ...`.
+
+   Watch the time of the node through another endpoint:
 
    ```bash
    talosctl -e 10.5.7.2 -n 10.5.7.3 time
+   ```
+
+   In the test (a freeze of 2 minutes), the requests failed for about 80 seconds after `cont`. Then the
+   node time was still 2 minutes behind the NTP server time, and 20 seconds later Talos had corrected it:
+
+   ```
+   NODE       NTP-SERVER            NODE-TIME                                 NTP-SERVER-TIME
+   10.5.7.3   time.cloudflare.com   2026-10-26 20:19:02.193684323 +0000 UTC   2026-10-26 20:21:02.313138228 +0000 UTC
+   10.5.7.3   time.cloudflare.com   2026-10-26 20:21:22.51020879 +0000 UTC    2026-10-26 20:21:22.499458349 +0000 UTC
    ```
 
    Continue with experiment 3 when the time is correct.
@@ -295,16 +308,19 @@ Do the experiments after the procedure, in the sequence below.
    Expected output (example):
 
    ```
-   etcd snapshot saved to "build/etcd.snapshot" (11649056 bytes)
-   snapshot info: hash 8d3c1f2a, revision 6120, total keys 1310, total size 11649056
+   etcd snapshot saved to "build/etcd.snapshot" (2764832 bytes)
+   snapshot info: hash 4a6791cf, revision 1453, total keys 477, total size 2764800
    ```
 
 2. Move the leadership. Use the node that is the leader now:
 
    ```bash
    talosctl -n 10.5.7.3 etcd forfeit-leadership
-   talosctl -n 10.5.7.2 etcd status
+   talosctl -n 10.5.7.2,10.5.7.3,10.5.7.4 etcd status
    ```
+
+   `forfeit-leadership` prints nothing. All members show a new leader, and `RAFT TERM` increases by 1 (a
+   new election).
 
 3. Defragment one member at a time, then check the alarms:
 
@@ -314,12 +330,15 @@ Do the experiments after the procedure, in the sequence below.
    talosctl -n 10.5.7.2 etcd alarm list
    ```
 
+   `defrag` prints nothing. `DB SIZE` of the member becomes smaller (in the test: 2.8 MB to 2.6 MB), and
+   `IN USE` is near 100 %. `alarm list` prints nothing when there is no alarm (for example `NOSPACE`).
+
    `defrag` blocks the member while it runs. Do not defragment all members at the same time.
 
 ### Experiment 4: Replace a control plane node
 
 1. Keep a copy of the control plane configuration. All control plane nodes of this cluster have the same
-   configuration (the host names come from DHCP):
+   configuration: it has no fixed host name (`HostnameConfig` with `auto: stable`):
 
    ```bash
    talosctl -n 10.5.7.2 get mc v1alpha1 -o jsonpath='{.spec}' > build/controlplane.yaml
@@ -332,13 +351,17 @@ Do the experiments after the procedure, in the sequence below.
    talosctl -n 10.5.7.2 etcd members
    ```
 
-   Two members remain. The node boots the ISO and waits in maintenance mode.
+   `reset` waits until the node is back (`post check passed`). Two members remain. The node boots the ISO
+   and waits in maintenance mode: `talosctl -n 10.5.7.4 get machinestatus --insecure` shows
+   `stage: maintenance`.
 
 3. Install the node again, as a new machine:
 
    ```bash
    talosctl -n 10.5.7.4 apply-config --insecure -f build/controlplane.yaml
    ```
+
+   Expected output: `Applied configuration without a reboot`. The node installs Talos and reboots.
 
 4. Wait until etcd has three members again:
 
@@ -347,8 +370,9 @@ Do the experiments after the procedure, in the sequence below.
    mise run check
    ```
 
-   The new member has a new ID. It joins as a *learner* first, and becomes a voting member when it has the
-   data.
+   In the test, etcd had three members again after about 80 seconds. The new member has a new ID and the old
+   host name. It joins as a *learner* first, and becomes a voting member when it has the data. In a small
+   cluster this is too fast to see.
 
 ### Experiment 5: Recover from a snapshot after the loss of quorum
 
@@ -378,8 +402,18 @@ Do the experiments after the procedure, in the sequence below.
    talosctl -n 10.5.7.2,10.5.7.3,10.5.7.4 service etcd
    ```
 
-   Expected output (example, part): `STATE Preparing` on each node. etcd waits for a bootstrap. The Kubernetes
-   API and the VIP are not available.
+   Expected output (part, for each node):
+
+   ```
+   NODE     10.5.7.4
+   ID       etcd
+   STATE    Preparing
+   HEALTH   ?
+   EVENTS   [Preparing]: Running pre state (...)
+   ```
+
+   etcd waits for a bootstrap. The Kubernetes API and the VIP are not available:
+   `kubectl --server "https://$VIP:6443" get nodes` fails with `connect: no route to host`.
 
 4. Recover on one node:
 
@@ -390,7 +424,7 @@ Do the experiments after the procedure, in the sequence below.
    Expected output (example):
 
    ```
-   recovering from snapshot "build/etcd.snapshot": hash 8d3c1f2a, revision 7044, total keys 1342, total size 11649056
+   recovering from snapshot "build/etcd.snapshot": hash d94ffb9b, revision 2085, total keys 576, total size 4116480
    ```
 
 5. Wait for the cluster and examine the ConfigMaps:
@@ -400,8 +434,16 @@ Do the experiments after the procedure, in the sequence below.
    kubectl get configmap before-snapshot after-snapshot
    ```
 
+   Expected output:
+
+   ```
+   NAME              DATA   AGE
+   before-snapshot   1      17m
+   Error from server (NotFound): configmaps "after-snapshot" not found
+   ```
+
    `before-snapshot` exists. `after-snapshot` is `NotFound`: it was written after the snapshot. The other two
-   nodes joined the recovered etcd cluster without a bootstrap.
+   nodes joined the recovered etcd cluster without a bootstrap. All three members have new IDs.
 
 6. Delete the ConfigMap:
 
