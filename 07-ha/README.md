@@ -81,7 +81,7 @@ The long time for a crash prevents two owners at the same time (split brain).
 | Provisioner | QEMU, preset `iso` |
 | Nodes | `ha-controlplane-1..3` (10.5.7.2 to 10.5.7.4), `ha-worker-1` (10.5.7.5) |
 | Network | bridge, `10.5.7.0/24`, gateway and load balancer `10.5.7.1` |
-| VIP | `10.5.7.50` on `net0` of the control plane nodes |
+| VIP | `10.5.7.50` on `net0` (the alias of `enp0s6`) of the control plane nodes |
 | Memory | 2 GiB per VM, 8 GiB in total |
 
 ## Files
@@ -101,13 +101,13 @@ Do the steps in the stage folder (`07-ha/`).
 mise run up
 ```
 
-The task makes four VMs and runs `check`. Expected output of the etcd members (example):
+The task makes four VMs and runs `check`. Expected output of the etcd members (the IDs are random):
 
 ```
-NODE       ID                 HOSTNAME             PEER URLS                 CLIENT URLS               LEARNER
-10.5.7.2   2b1a6f3e5c1d4f08   ha-controlplane-1    https://10.5.7.2:2380     https://10.5.7.2:2379     false
-10.5.7.2   6c0e2d7a91b84e33   ha-controlplane-2    https://10.5.7.3:2380     https://10.5.7.3:2379     false
-10.5.7.2   9f4b8c1e27a05d6a   ha-controlplane-3    https://10.5.7.4:2380     https://10.5.7.4:2379     false
+NODE       ID                 HOSTNAME            PEER URLS               CLIENT URLS             LEARNER
+10.5.7.2   7d2c54c5d5ee42a4   ha-controlplane-2   https://10.5.7.3:2380   https://10.5.7.3:2379   false
+10.5.7.2   9106966f3c0743a6   ha-controlplane-3   https://10.5.7.4:2380   https://10.5.7.4:2379   false
+10.5.7.2   f3ff2153a4230f63   ha-controlplane-1   https://10.5.7.2:2380   https://10.5.7.2:2379   false
 ```
 
 ### Step 2: Examine the talosconfig endpoints
@@ -116,7 +116,18 @@ NODE       ID                 HOSTNAME             PEER URLS                 CLI
 talosctl config info
 ```
 
-The endpoints are the three control plane addresses, not the VIP. `talosctl` tries them in sequence.
+Expected output:
+
+```
+Current context:     ha
+Nodes:               10.5.7.2
+Endpoints:           10.5.7.2, 10.5.7.3, 10.5.7.4
+Roles:               os:admin
+Certificate expires: 1 year from now (...)
+```
+
+The endpoints are the three control plane addresses, not the VIP. `talosctl` uses one of them, and another
+one if it cannot connect.
 
 ### Step 3: Examine etcd
 
@@ -128,13 +139,14 @@ talosctl -n 10.5.7.2,10.5.7.3,10.5.7.4 service etcd
 Expected output of the first command (example):
 
 ```
-NODE       MEMBER             DB SIZE   IN USE            LEADER             RAFT INDEX   RAFT TERM   RAFT APPLIED INDEX   LEARNER   ERRORS
-10.5.7.2   2b1a6f3e5c1d4f08   12 MB     5.1 MB (42.50%)   6c0e2d7a91b84e33   8212         2           8212                 false
-10.5.7.3   6c0e2d7a91b84e33   12 MB     5.0 MB (41.67%)   6c0e2d7a91b84e33   8212         2           8212                 false
-10.5.7.4   9f4b8c1e27a05d6a   12 MB     5.0 MB (41.67%)   6c0e2d7a91b84e33   8212         2           8212                 false
+NODE       MEMBER             DB SIZE   IN USE            LEADER             RAFT INDEX   RAFT TERM   RAFT APPLIED INDEX   LEARNER   PROTOCOL   STORAGE   ERRORS
+10.5.7.3   7d2c54c5d5ee42a4   1.6 MB    1.6 MB (99.74%)   f3ff2153a4230f63   736          2           736                  false     3.7.2      3.7.0
+10.5.7.4   9106966f3c0743a6   1.6 MB    1.6 MB (99.48%)   f3ff2153a4230f63   736          2           736                  false     3.7.2      3.7.0
+10.5.7.2   f3ff2153a4230f63   1.6 MB    1.6 MB (99.74%)   f3ff2153a4230f63   736          2           736                  false     3.7.2      3.7.0
 ```
 
-All members show the same leader.
+All members show the same leader and the same raft index. `PROTOCOL` is the etcd version, `STORAGE` the
+version of the data format.
 
 ### Step 4: Find the VIP owner
 
@@ -145,11 +157,11 @@ talosctl -n 10.5.7.2,10.5.7.3,10.5.7.4 get addresses | grep -E 'NODE|10.5.7.50'
 Expected output (example):
 
 ```
-NODE       NAMESPACE   TYPE            ID                  VERSION   ADDRESS        LINK
-10.5.7.3   network     AddressStatus   net0/10.5.7.50/32   1         10.5.7.50/32   net0
+NODE       NAMESPACE   TYPE            ID                      VERSION   ADDRESS        LINK
+10.5.7.2   network     AddressStatus   enp0s6/10.5.7.50/32     1         10.5.7.50/32   enp0s6
 ```
 
-Only one node has the address. Use the VIP:
+Only one node has the address. The status shows the link name `enp0s6`; `net0` in the patch is its alias. Use the VIP:
 
 ```bash
 kubectl --server "https://$VIP:6443" get nodes
@@ -161,6 +173,13 @@ The command works because the VIP is in the certificate (`certExtraSANs`). Exami
 openssl s_client -connect "$VIP:6443" </dev/null 2>/dev/null | openssl x509 -noout -ext subjectAltName
 ```
 
+Expected output (part):
+
+```
+X509v3 Subject Alternative Name:
+    DNS:kubernetes, DNS:kubernetes.default, ..., DNS:ha-controlplane-1, IP Address:10.5.7.1, IP Address:10.5.7.2, IP Address:10.5.7.50, ...
+```
+
 ### Step 5: Examine KubePrism
 
 ```bash
@@ -168,7 +187,26 @@ talosctl -n 10.5.7.5 get kubeprismstatuses
 talosctl -n 10.5.7.5 get kubeprismendpoints -o yaml | yq .spec
 ```
 
-The worker knows all three API servers. Its kubelet uses `https://127.0.0.1:7445`.
+Expected output:
+
+```
+NODE       NAMESPACE   TYPE              ID                 VERSION   HOST             HEALTHY
+10.5.7.5   k8s         KubePrismStatus   k8s-loadbalancer   2         127.0.0.1:7445   true
+endpoints:
+  - host: 10.5.7.1
+    port: 6443
+  - host: 10.5.7.2
+    port: 6443
+  - host: 10.5.7.50
+    port: 6443
+  - host: 10.5.7.3
+    port: 6443
+  - host: 10.5.7.4
+    port: 6443
+```
+
+The worker knows the three API servers, the cluster endpoint (the load balancer `10.5.7.1`) and the VIP.
+Its kubelet uses `https://127.0.0.1:7445`.
 
 ## Experiments
 
@@ -191,8 +229,8 @@ Do the experiments after the procedure, in the sequence below.
    talosctl -n 10.5.7.3 reboot
    ```
 
-3. In the second terminal, look for failed requests. Expected result: no failure or one failure. The owner
-   releases the VIP before it stops.
+3. In the second terminal, look for failed requests. Expected result: no failure (in the test: 0 of 46
+   requests). The owner releases the VIP before it stops, and another node takes it at once.
 
 4. Find the new owner (step 4 of the procedure).
 
@@ -208,16 +246,24 @@ Do the experiments after the procedure, in the sequence below.
 
    The VM stops at once, as after a crash. It does not release the VIP.
 
-3. Count the failed requests in the second terminal. Expected result: failures for 30 to 60 seconds. Then
-   another node takes the VIP.
+3. Count the failed requests in the second terminal. Expected result: failures for approximately 60
+   seconds. Then another node takes the VIP. In the test:
 
-4. Show the etcd members from a node that runs:
+   ```
+   11:16:43 Unable to connect to the server: context deadline exceeded
+   ...
+   11:17:43 Unable to connect to the server: dial tcp 10.5.7.50:6443: connect: no route to host
+   ```
+
+4. Show the etcd status from a node that runs (not the frozen node):
 
    ```bash
    talosctl -n 10.5.7.2 etcd status
+   talosctl -n 10.5.7.2 etcd members
    ```
 
-   One member shows an error. Two of three members are a quorum: the cluster works.
+   The member has a leader, and the list still has three members. Two of three members are a quorum: the
+   cluster works. Do not send requests to the frozen node: they wait until their timeout.
 
 5. Continue the VM:
 
