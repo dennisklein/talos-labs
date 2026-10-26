@@ -382,7 +382,13 @@ shows `EFI`, `EPHEMERAL`, `META`, `STATE`, `r-raw-data`, `u-local-data`, `u-scra
    talosctl -n 10.5.8.3 wipe disk vdb1 --drop-partition
    ```
 
-   If the command fails with `blockdevice is in use by volume`, the document is still in the configuration.
+   `wipe` prints nothing. After it, `talosctl -n 10.5.8.3 get discoveredvolumes | grep vdb` shows no `vdb1`, and
+   `/dev/disk/by-partlabel` has no `u-local-data`. In the test, `vdb1` stayed in the list when `u-secret`
+   (experiment 3) was still open on the same disk. A probable cause: the kernel does not read the partition
+   table of a disk again while another partition of it is in use.
+
+   If the command fails with `blockdevice "vdb1" is in use by volume "u-local-data"`, the document is still
+   in the configuration.
 
 ## Troubleshooting
 
