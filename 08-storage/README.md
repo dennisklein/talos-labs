@@ -126,20 +126,46 @@ mise run up
    talosctl -n 10.5.8.3 get disks
    ```
 
-   Expected output (example, part):
+   Expected output:
 
    ```
-   NODE       NAMESPACE   TYPE   ID      VERSION   SIZE     READ ONLY   TRANSPORT   ROTATIONAL   ...
-   10.5.8.3   runtime     Disk   vda     1         11 GB    false       virtio      true
-   10.5.8.3   runtime     Disk   vdb     1         6.4 GB   false       virtio      true
-   10.5.8.3   runtime     Disk   vdc     1         4.3 GB   false       virtio      true
+   NODE       NAMESPACE   TYPE   ID      VERSION   SIZE     READ ONLY   TRANSPORT   ROTATIONAL   WWID   MODEL          SERIAL
+   10.5.8.3   runtime     Disk   loop0   2         4.1 kB   true
+   10.5.8.3   runtime     Disk   loop1   2         94 MB    true
+   10.5.8.3   runtime     Disk   sr0     2         364 MB   true        sata        true                QEMU DVD-ROM
+   10.5.8.3   runtime     Disk   sr1     2         0 B      true        sata                            QEMU DVD-ROM
+   10.5.8.3   runtime     Disk   vda     2         11 GB    false       virtio      true
+   10.5.8.3   runtime     Disk   vdb     2         6.4 GB   false       virtio      true
+   10.5.8.3   runtime     Disk   vdc     2         4.3 GB   false       virtio      true
    ```
+
+   `vda` is the system disk, `vdb` (6 GiB) and `vdc` (4 GiB) are the extra disks. `sr0` is the Talos ISO,
+   `loop1` the squashfs of the running system.
 
 2. Show the details of one disk. These fields are available in CEL expressions:
 
    ```bash
    talosctl -n 10.5.8.3 get disk vdb -o yaml | yq .spec
    ```
+
+   Expected output (part):
+
+   ```
+   dev_path: /dev/vdb
+   size: 6442450944
+   pretty_size: 6.4 GB
+   readonly: false
+   cdrom: false
+   transport: virtio
+   rotational: true
+   symlinks:
+     - /dev/disk/by-diskseq/12
+     - /dev/disk/by-path/pci-0000:00:08.0
+     - /dev/disk/by-path/virtio-pci-0000:00:08.0
+   ```
+
+   A CEL expression uses the names with the prefix `disk.`, for example `disk.dev_path == "/dev/vdb"` or
+   `disk.size > 5u * GiB`.
 
 3. Show the partitions and the system volumes:
 
@@ -148,7 +174,20 @@ mise run up
    talosctl -n 10.5.8.3 get volumestatuses
    ```
 
-   EPHEMERAL is about 5 GiB (the patch). The rest of `vda` is free.
+   Expected output of `discoveredvolumes` (part):
+
+   ```
+   NODE       NAMESPACE   TYPE               ID      VERSION   TYPE        SIZE     DISCOVERED   LABEL       PARTITIONLABEL
+   10.5.8.3   runtime     DiscoveredVolume   vda1    1         partition   2.2 GB   vfat         EFI         EFI
+   10.5.8.3   runtime     DiscoveredVolume   vda2    1         partition   1.0 MB   talosmeta                META
+   10.5.8.3   runtime     DiscoveredVolume   vda3    1         partition   105 MB   xfs          STATE       STATE
+   10.5.8.3   runtime     DiscoveredVolume   vda4    1         partition   5.4 GB   xfs          EPHEMERAL   EPHEMERAL
+   10.5.8.3   runtime     DiscoveredVolume   vdb     1         disk        6.4 GB
+   10.5.8.3   runtime     DiscoveredVolume   vdc     1         disk        4.3 GB
+   ```
+
+   EPHEMERAL is 5 GiB (5.4 GB, the patch). The rest of `vda` (about 3 GB) is free. `vdb` and `vdc` have no
+   partition table.
 
 ### Step 3: Make a user volume on the extra disk
 
@@ -165,11 +204,11 @@ mise run up
    talosctl -n 10.5.8.3 get volumestatus u-local-data --watch
    ```
 
-   Expected output at the end (example):
+   Expected output at the end:
 
    ```
    NODE       NAMESPACE   TYPE           ID             VERSION   TYPE        PHASE   LOCATION    SIZE
-   10.5.8.3   runtime     VolumeStatus   u-local-data   4         partition   ready   /dev/vdb1   3.2 GB
+   10.5.8.3   runtime     VolumeStatus   u-local-data   2         partition   ready   /dev/vdb1   3.2 GB
    ```
 
    The size is `maxSize` (3 GiB), because the disk has enough space.
@@ -179,6 +218,13 @@ mise run up
    ```bash
    talosctl -n 10.5.8.3 get mountstatus u-local-data
    talosctl -n 10.5.8.3 list /var/mnt
+   ```
+
+   Expected output of `get mountstatus`:
+
+   ```
+   NODE       NAMESPACE   TYPE          ID             VERSION   SOURCE      TARGET                FILESYSTEM   VOLUME
+   10.5.8.3   runtime     MountStatus   u-local-data   2         /dev/vdb1   /var/mnt/local-data   xfs          u-local-data
    ```
 
    No reboot was necessary.
@@ -194,7 +240,9 @@ mise run up
    kubectl get pod writer -o wide
    ```
 
-   The pod runs on `storage-worker-1`: the PersistentVolume has a node affinity.
+   The pod runs on `storage-worker-1`: the PersistentVolume has a node affinity. The PV and the claim are
+   `Bound`. `kubectl apply` shows a warning that the pod violates the Pod Security level `restricted`. This
+   is only a warning: the default level `baseline` permits the pod.
 
 2. Read the file from the host side with the Talos API:
 
@@ -211,6 +259,13 @@ mise run up
    kubectl exec writer -- cat /data/log.txt
    ```
 
+   Expected output (example):
+
+   ```
+   Fri Oct 23 09:52:26 UTC 2026
+   Fri Oct 23 09:53:00 UTC 2026
+   ```
+
 ## Experiments
 
 Do the experiments after the procedure, in the sequence below.
@@ -223,7 +278,7 @@ talosctl -n 10.5.8.3 get volumestatus u-scratch
 talosctl -n 10.5.8.3 get discoveredvolumes | grep vda
 ```
 
-The new partition `u-scratch` is on `vda`, after EPHEMERAL. Without the EPHEMERAL limit, EPHEMERAL takes the
+The new partition `u-scratch` is `/dev/vda5` (2.1 GB, `maxSize`), after EPHEMERAL. Without the EPHEMERAL limit, EPHEMERAL takes the
 full disk and the volume does not become `ready` (no space).
 
 ### Experiment 2: A directory volume
@@ -234,7 +289,8 @@ talosctl -n 10.5.8.3 get volumestatus u-cache
 talosctl -n 10.5.8.3 get mountstatus u-cache
 ```
 
-The type is `directory`, and the mount source is a directory on EPHEMERAL. There is no new partition.
+The type is `directory`, and the mount has no source device (`SOURCE` is empty, `FILESYSTEM` is `none`):
+`/var/mnt/cache` is a directory on EPHEMERAL. There is no new partition.
 
 ### Experiment 3: An encrypted volume
 
@@ -251,6 +307,17 @@ The type is `directory`, and the mount source is a directory on EPHEMERAL. There
    ```bash
    talosctl -n 10.5.8.3 get volumestatus u-secret -o yaml | yq '.spec | {"location": .location, "mountLocation": .mountLocation, "encryptionProvider": .encryptionProvider, "encryptionFailedSyncs": .encryptionFailedSyncs}'
    talosctl -n 10.5.8.3 get discoveredvolumes | grep -E 'TYPE|luks'
+   ```
+
+   Expected output:
+
+   ```
+   location: /dev/vdb2
+   mountLocation: /dev/dm-0
+   encryptionProvider: luks2
+   encryptionFailedSyncs: null
+   NODE       NAMESPACE   TYPE               ID      VERSION   TYPE        SIZE     DISCOVERED   LABEL   PARTITIONLABEL
+   10.5.8.3   runtime     DiscoveredVolume   vdb2    2         partition   1.1 GB   luks                 u-secret
    ```
 
    - `location` is the partition (`/dev/vdb2`), with the file system type `luks` on the disk.
@@ -271,8 +338,9 @@ talosctl -n 10.5.8.3 get volumestatus r-raw-data
 talosctl -n 10.5.8.3 list /dev/disk/by-partlabel
 ```
 
-The phase is `ready`, but there is no mount. The link `/dev/disk/by-partlabel/r-raw-data` points to the
-partition. A storage system (for example Ceph or OpenEBS) can use it as a block device.
+The phase is `ready` (`/dev/vdc1`, 1.1 GB), but there is no mount. The list of `/dev/disk/by-partlabel`
+shows `EFI`, `EPHEMERAL`, `META`, `STATE`, `r-raw-data`, `u-local-data`, `u-scratch` and `u-secret`. The link
+`r-raw-data` points to the partition. A storage system (for example Ceph or OpenEBS) can use it as a block device.
 
 ### Experiment 5: Remove a volume and add it again
 
@@ -290,7 +358,12 @@ partition. A storage system (for example Ceph or OpenEBS) can use it as a block 
    talosctl -n 10.5.8.3 get discoveredvolumes | grep u-local-data
    ```
 
-   The volume status is gone. The partition `u-local-data` is still on `vdb`.
+   `get volumestatus` fails with `NotFound`: the volume status is gone. The partition is still on `vdb`:
+
+   ```
+   NODE       NAMESPACE   TYPE               ID     VERSION   TYPE        SIZE     DISCOVERED   LABEL   PARTITIONLABEL
+   10.5.8.3   runtime     DiscoveredVolume   vdb1   1         partition   3.2 GB   xfs                  u-local-data
+   ```
 
 3. Add the document again and read the old file:
 
