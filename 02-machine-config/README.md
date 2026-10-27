@@ -172,13 +172,21 @@ The `up` task makes the cluster (1 control plane node, 1 worker) and runs `check
 the `MachineConfig` resource of each node. Expected output (example, part):
 
 ```
-NODE       NAMESPACE   TYPE            ID         VERSION
-10.5.2.2   config      MachineConfig   v1alpha1   1
-10.5.2.3   config      MachineConfig   v1alpha1   1
+NODE       NAMESPACE   TYPE            ID           VERSION
+10.5.2.2   config      MachineConfig   persistent   1
+10.5.2.2   config      MachineConfig   v1alpha1     1
+10.5.2.3   config      MachineConfig   persistent   1
+10.5.2.3   config      MachineConfig   v1alpha1     1
 ```
 
-The resource ID is `v1alpha1`. It holds the complete multi-document configuration. `VERSION` increases
-with each change.
+Each node has two resources. Each holds a complete multi-document configuration. `VERSION` increases with
+each change.
+
+- `v1alpha1` is the active configuration: the node runs with it.
+- `persistent` is the configuration that is saved on the disk: the node uses it after the next boot.
+
+Normally, the two are the same. They are different after a change in `try` mode (`persistent` is behind)
+or in `staged` mode (`persistent` is ahead). Step 7 uses the `try` mode.
 
 ### Step 2: Make a configuration by hand
 
@@ -213,14 +221,26 @@ This step does not touch the cluster. It shows what `talosctl cluster create` di
    yq -N '.kind // "(v1alpha1)"' build/gen/worker.yaml
    ```
 
-   `controlplane.yaml` has about 30 documents. `worker.yaml` has about 15. Only the control plane has the
-   documents for the API server, the controller manager, the scheduler, kube-proxy, Flannel and CoreDNS.
+   `controlplane.yaml` has 29 documents. `worker.yaml` has 15: the `v1alpha1` document and the documents
+   from `DiscoveryServiceConfig` to `KubePrismConfig`. Only the control plane has the documents after
+   `KubePrismConfig`: the CAs and settings of the API server, the controller manager, the scheduler,
+   kube-proxy, Flannel and CoreDNS.
 
 4. Find the private keys. Only `controlplane.yaml` has the CA keys:
 
    ```bash
    grep -c 'key:' build/gen/controlplane.yaml build/gen/worker.yaml
    ```
+
+   Expected output:
+
+   ```
+   build/gen/controlplane.yaml:4
+   build/gen/worker.yaml:1
+   ```
+
+   The one line in `worker.yaml` is `key: ""`: the worker has the certificate of the machine CA, but not
+   its key. Thus, keep `controlplane.yaml` (and `secrets.yaml`) secret, like a private key.
 
 ### Step 3: Validate a configuration
 
