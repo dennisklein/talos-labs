@@ -41,12 +41,12 @@ fail. On Talos, each control plane node runs one etcd member.
        10.5.7.1:6443         on one CP node
        (QEMU provisioner)    (etcd election)
                  \             |               /
-          +--------------+ +--------------+ +--------------+
-          | controlplane-1| | controlplane-2| | controlplane-3|      etcd: 3 members
-          | apiserver    | | apiserver    | | apiserver    |
-          +--------------+ +--------------+ +--------------+
-                 ^               ^                ^
-                 +--- (3) KubePrism 127.0.0.1:7445 on each node ---+
+          +----------------+ +----------------+ +----------------+
+          | controlplane-1 | | controlplane-2 | | controlplane-3 |      etcd: 3 members
+          | apiserver      | | apiserver      | | apiserver      |
+          +----------------+ +----------------+ +----------------+
+                  ^                  ^                  ^
+                  +---- (3) KubePrism 127.0.0.1:7445 on each node ----+
                       (kubelet, Cilium, pods with host network)
 ```
 

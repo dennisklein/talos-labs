@@ -278,8 +278,8 @@ talosctl -n 10.5.8.3 get volumestatus u-scratch
 talosctl -n 10.5.8.3 get discoveredvolumes | grep vda
 ```
 
-The new partition `u-scratch` is `/dev/vda5` (2.1 GB, `maxSize`), after EPHEMERAL. Without the EPHEMERAL limit, EPHEMERAL takes the
-full disk and the volume does not become `ready` (no space).
+The new partition `u-scratch` is `/dev/vda5` (2.1 GB, `maxSize`), after EPHEMERAL. Without the EPHEMERAL
+limit, EPHEMERAL takes the full disk and the volume does not become `ready` (no space).
 
 ### Experiment 2: A directory volume
 

@@ -4,9 +4,9 @@
 
 This repository is a series of labs ("stages") for Talos Linux 1.14 and later. Each stage is a folder with a
 small Talos cluster and a topic. Stages 01 to 03 run Talos in Docker containers (fast, no disks, no boot).
-Stages 04 to 09 run Talos in QEMU virtual machines (KubeSpan, install, upgrade, disks, Secure Boot). Do the stages in
-sequence. Each stage README has the concepts, ASCII diagrams, a step-by-step procedure with expected output,
-experiments and troubleshooting.
+Stages 04 to 09 run Talos in QEMU virtual machines (KubeSpan, install, upgrade, disks, Secure Boot). Do the
+stages in sequence. Each stage README has the concepts, ASCII diagrams, a step-by-step procedure with expected
+output, experiments and troubleshooting.
 
 ## The stages
 
@@ -126,7 +126,7 @@ Other useful commands:
 | Linux host, x86_64 | The labs are tested on Linux. |
 | Docker | Stages 01 to 03. The user must be in the group `docker`. |
 | Internet access | Images from `ghcr.io`, `factory.talos.dev`, `registry.k8s.io`; discovery at `discovery.talos.dev`. |
-| `br_netfilter` kernel module | `sudo modprobe br_netfilter`. Without it, `cluster create docker` fails with `Failed to check br_netfilter`. |
+| `br_netfilter` kernel module | `sudo modprobe br_netfilter`. Without it, the Flannel pods fail with `Failed to check br_netfilter`, and `cluster create docker` waits for `Ready` nodes until its timeout. |
 
 ### QEMU stages (04 to 09)
 
@@ -197,7 +197,8 @@ talosctl version --client
 mise ls talosctl
 ```
 
-Stage 06 starts one patch release behind (`talos_previous_version`) and upgrades to `TALOS_VERSION`.
+Stage 06 starts one patch release behind (`talos_previous_version`) and upgrades to the labs version
+(`talos_version`).
 
 ### Kubernetes version
 
