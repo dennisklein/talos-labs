@@ -127,7 +127,9 @@ ovmf_tpm_firmware() {
 
 # Background jobs cannot ask for the sudo password (no terminal). Refresh the sudo timestamp each
 # minute while a long talosctl command runs, so that the jobs and the next sudo do not prompt.
-sudo_keepalive() { while sleep 60; do sudo -n -v || return 0; done; }
+# Stop when the task shell is gone ($$ in a subshell): a SIGTERM or SIGHUP to the task does not
+# reach this job.
+sudo_keepalive() { while sleep 60 && kill -0 $$ 2>/dev/null; do sudo -n -v || return 0; done; }
 
 talos_up_qemu() {  # extra flags (--workers, --controlplanes, --disks, --presets, ...) are passed through
   local patches
@@ -143,7 +145,7 @@ talos_up_qemu() {  # extra flags (--workers, --controlplanes, --disks, --presets
     --talosconfig-destination "$TALOSCONFIG" --talos-version "$(talos_version)" \
     "${patches[@]}" "$@" || rc=$?
   kill "$keepalive" 2>/dev/null || true
-  [ "$rc" -eq 0 ] || { kill "$firewall" 2>/dev/null; return "$rc"; }
+  [ "$rc" -eq 0 ] || { kill "$firewall" 2>/dev/null; own_configs; return "$rc"; }
   wait "$firewall" || true
   own_configs
   talosctl config node "$(node_ip 1)"
