@@ -10,7 +10,8 @@ Talos.
 When you complete this stage, you know:
 
 - Which configuration documents disable Flannel and kube-proxy.
-- Why a Talos cluster without a CNI waits in the boot sequence, and how to install the CNI in this window.
+- Why `talosctl cluster create` skips the `Ready` checks when the CNI is `none`, and why you install the CNI
+  after it.
 - What KubePrism is and why Cilium uses `localhost:7445` as the API server address.
 - Which Cilium Helm values are necessary on Talos, and why.
 - The four ways to install a CNI on Talos.
@@ -251,14 +252,15 @@ initial state.
    kubectl -n kube-system exec ds/cilium -- cilium-dbg service list | grep -A2 "$(kubectl get svc web -o jsonpath='{.spec.clusterIP}')"
    ```
 
-3. Show that no node has kube-proxy rules. Talos keeps its own nftables chains as resources:
+3. Show that kube-proxy does not run:
 
    ```bash
-   talosctl -n 10.5.3.3 get nftableschains
+   kubectl -n kube-system get daemonset kube-proxy
    ```
 
-   The list has only the Talos chains (for example the ingress firewall chain, if configured). There is no
-   `kube-proxy` table.
+   Expected output: `Error from server (NotFound): daemonsets.apps "kube-proxy" not found`. Do not use
+   `talosctl get nftableschains` for this check: it shows only the chains that Talos manages. kube-proxy
+   writes its rules directly into the kernel, so they never show in that list.
 
 4. Delete the objects:
 
@@ -266,7 +268,7 @@ initial state.
    kubectl delete service web; kubectl delete deployment web
    ```
 
-### Experiment 2: KubePrism keeps working when the Service is not reachable
+### Experiment 2: The Cilium agent uses KubePrism, not the Service
 
 1. Show the API server address that the Cilium agent uses:
 
@@ -276,8 +278,8 @@ initial state.
 
    Expected output: `localhost:7445`.
 
-2. Restart the Cilium agents. While the agents restart, no node implements the `kubernetes` Service. The agents
-   still connect, because they use KubePrism:
+2. Restart the Cilium agents. The agents do not need the `kubernetes` Service (10.96.0.1) to find the API
+   server, because they connect to KubePrism on their own node:
 
    ```bash
    kubectl -n kube-system rollout restart ds/cilium
@@ -289,6 +291,11 @@ initial state.
    ```bash
    kubectl -n kube-system logs ds/cilium | grep -m3 -i 'localhost:7445'
    ```
+
+   This experiment shows the configuration, not the failure case. The restart cannot remove the Service:
+   `rollout restart` replaces one agent at a time, and Cilium keeps its BPF maps (and thus the Services)
+   while an agent restarts. The real case without the Service is the first start, in step 1: Cilium
+   started on nodes that had no kube-proxy and no Service implementation.
 
 ### Experiment 3: Capabilities of the agent
 
@@ -318,7 +325,7 @@ This experiment does not change the cluster. It shows the size of an inline mani
 
    ```bash
    helm repo add cilium https://helm.cilium.io/ && helm repo update cilium
-   helm template cilium cilium/cilium --version "$(cilium version --client | sed -n 's/^cilium image (stable): v//p')" \
+   helm template cilium cilium/cilium --version "${CILIUM_VERSION:-$(cilium version --client | sed -n 's/^cilium image (stable): v//p')}" \
      --namespace kube-system --values values.yaml > build/cilium.yaml
    ls -l build/cilium.yaml
    ```
@@ -335,8 +342,8 @@ This experiment does not change the cluster. It shows the size of an inline mani
    If the number is more than 131072 (128 KiB), the Docker provisioner cannot give this configuration to a node.
    The container stops at once, and `docker logs <container>` shows `exec /sbin/init: argument list too long`.
    `talosctl cluster create` then stops with `panic: ParseAddr("invalid IP")`. A patch of 90 KB is sufficient
-   to cause this, because base64 makes the data 4/3 larger. On QEMU and on real machines, there is no such limit, and the inline manifest is the recommended
-   production method.
+   to cause this, because base64 makes the data 4/3 larger. On QEMU and on real machines, there is no such
+   limit, and the inline manifest is the recommended production method.
 
 ## Troubleshooting
 
