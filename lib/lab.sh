@@ -42,6 +42,17 @@ check_qemu() {
   command -v qemu-system-x86_64 >/dev/null || { echo "error: qemu-system-x86_64 not found" >&2; return 1; }
 }
 
+# Run a command each 5 s until it succeeds. Stop with an error after <seconds>.
+wait_for() {  # <what> <seconds> <command...>
+  local what="$1" limit="$2" start=$SECONDS
+  shift 2
+  echo "waiting for $what"
+  until "$@" >/dev/null 2>&1; do
+    ((SECONDS - start < limit)) || { echo "error: no $what after ${limit}s" >&2; return 1; }
+    sleep 5
+  done
+}
+
 # Address of node <n> in SUBNET: 1 is the first control plane node (.2), then the next ones
 node_ip() { echo "${SUBNET%.*}.$(($1 + 1))"; }
 

@@ -11,8 +11,7 @@ talos_up_qemu --workers 1 --presets iso,maintenance
 
 # cluster create returns when the VMs start, before they boot. Wait for the maintenance API.
 for n in 1 2; do
-  echo "waiting for the maintenance API on $(node_ip "$n")"
-  until talosctl -n "$(node_ip "$n")" version --insecure >/dev/null 2>&1; do sleep 5; done
+  wait_for "the maintenance API on $(node_ip "$n")" 600 talosctl -n "$(node_ip "$n")" version --insecure
 done
 ref="$(build_dir)/provisioner"
 mkdir -p "$ref"

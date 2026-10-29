@@ -6,6 +6,12 @@ cp_ip="$(node_ip 1)"
 worker_ip="$(node_ip 2)"
 gen="$(build_dir)"
 
+# An installed node has no maintenance API: the wait below would never end.
+if [ -e "$TALOSCONFIG" ] && timeout 10 talosctl -n "$cp_ip" version >/dev/null 2>&1; then
+  echo "error: $cp_ip is installed already. For a new install, run 'mise run down' and 'mise run up'." >&2
+  exit 1
+fi
+
 [ -e "$gen/secrets.yaml" ] || talosctl gen secrets -o "$gen/secrets.yaml"
 talosctl gen config "$CLUSTER" "https://$cp_ip:6443" --with-secrets "$gen/secrets.yaml" \
   --install-disk /dev/vda --with-docs=false --with-examples=false --output "$gen" --force
@@ -13,13 +19,13 @@ talosctl config endpoint "$cp_ip"
 talosctl config node "$cp_ip"
 
 for ip in "$cp_ip" "$worker_ip"; do
-  until talosctl -n "$ip" version --insecure >/dev/null 2>&1; do sleep 5; done
+  wait_for "the maintenance API on $ip" 600 talosctl -n "$ip" version --insecure
 done
 talosctl apply-config --insecure -n "$cp_ip" -f "$gen/controlplane.yaml" -p @node-patches/controlplane-1.yaml
 talosctl apply-config --insecure -n "$worker_ip" -f "$gen/worker.yaml" -p @node-patches/worker-1.yaml
 
 # The nodes install Talos to /dev/vda and reboot. Wait for the authenticated API.
-until talosctl -n "$cp_ip" version >/dev/null 2>&1; do sleep 5; done
+wait_for "the Talos API on $cp_ip" 900 talosctl -n "$cp_ip" version
 talosctl bootstrap
 rm -f "$KUBECONFIG"
 talosctl kubeconfig "$KUBECONFIG"
