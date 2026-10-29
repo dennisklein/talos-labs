@@ -218,6 +218,9 @@ ls build/
 
 Expected output of `ls`: `controlplane.yaml  provisioner  secrets.yaml  state  talosconfig  worker.yaml`.
 
+`mise run down` keeps the files in `build/`. If you do this step again after a new `up`, `gen secrets` and
+`gen config` refuse to overwrite the files. Keep `secrets.yaml` and add `--force` to `gen config`.
+
 Show the install settings:
 
 ```bash
@@ -416,10 +419,11 @@ Expected output: `https://10.5.5.2:6443` (your configuration, one control plane 
    talosctl -n 10.5.5.3 image list --namespace cri | grep nginx
    ```
 
-2. Wipe only EPHEMERAL and reboot:
+2. Wipe only EPHEMERAL and reboot. `--graceful=false` skips the drain: the pod `web` has no controller, and
+   a drain deletes it, and nothing makes it again:
 
    ```bash
-   talosctl -n 10.5.5.3 reset --system-labels-to-wipe EPHEMERAL --reboot
+   talosctl -n 10.5.5.3 reset --graceful=false --system-labels-to-wipe EPHEMERAL --reboot
    ```
 
 3. When the node is `Ready` again, examine the result:
@@ -431,7 +435,8 @@ Expected output: `https://10.5.5.2:6443` (your configuration, one control plane 
    ```
 
    - The configuration is still there (STATE). The node did not go to maintenance mode.
-   - The container images are gone (EPHEMERAL). Kubernetes starts the pod again and pulls the image again.
+   - The container images are gone (EPHEMERAL). The pod object is still bound to the node. Thus, the kubelet
+     starts the pod again and pulls the image again.
 
 4. Delete the pod:
 
@@ -453,7 +458,7 @@ without `--insecure` (with the `talosconfig`), as in stage 02.
 
 | Symptom | Cause | Remedy |
 |---------|-------|--------|
-| `error: /dev/kvm not found`. | KVM is not available. | Enable virtualization in the firmware. In a VM, enable nested virtualization. Add your user to the group `kvm`. |
+| `error: /dev/kvm not found`. | KVM is not available. | Enable virtualization in the firmware. In a VM, enable nested virtualization. |
 | `cluster create` fails with a CNI or iptables error. | The CNI bundle download failed, or `iptables` is missing. | Delete `~/.talos/cni` and try again. Install `iptables`. |
 | `cluster create` fails with an OVMF error. | No UEFI firmware. | Install `ovmf` (Debian, Ubuntu) or `edk2-ovmf` (Fedora). |
 | `mise run install` stops with `error: 10.5.5.2 is installed already`. | The nodes are installed. The maintenance API is closed (experiment 5). | For a new install, `mise run down`, then `mise run up`. |
