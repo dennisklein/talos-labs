@@ -152,7 +152,8 @@ Because it runs as root, these files belong to root.
 
 The root `mise.toml` is the single source of truth for the tools and the shared environment:
 
-- `[tools]`: `talosctl`, `kubectl`, `helm`, `cilium-cli`, `jq`, `yq`. All tools use `latest`.
+- `[tools]`: `talosctl`, `kubectl`, `helm`, `cilium-cli`, `jq`, `yq`. All tools use `latest`. The lock file
+  `mise.lock` keeps the tested versions (see [Tool versions](#tool-versions)).
 - `[env]`: `LAB_ROOT`. The stage tasks use it to find the shared shell functions in `lib/lab.sh`.
 - Hidden tasks `preflight` (Docker, Talos version) and `preflight-qemu` (KVM, QEMU, Talos version, `sudo`).
 
@@ -162,10 +163,27 @@ use the cluster of that stage. You do not need `--context`.
 
 Without `mise activate`, use `mise x -- talosctl ...` in the stage folder.
 
+### Tool versions
+
+`mise.toml` requests `latest` for each tool. `mise.lock` records the versions that the labs are tested with,
+with their download URLs and checksums. `mise install` installs the locked versions, not the newest ones.
+The expected outputs in the READMEs come from these versions.
+
+To move the labs to new releases:
+
+```bash
+mise lock --bump --platform linux-x64   # resolve "latest" again and write mise.lock
+mise install
+```
+
+Then do the stages again, correct the READMEs where the outputs changed, and commit `mise.lock` with the
+corrections. Without `--bump`, `mise lock` keeps the locked versions and refreshes only their URLs and
+checksums.
+
 ### Talos version
 
-By default, the labs use the Talos version of `talosctl`. mise installs the latest `talosctl` release. Thus,
-a new Talos release goes into the labs without a change in this repository. The function `talos_version` in
+By default, the labs use the Talos version of `talosctl`, which is the version in `mise.lock`. A new Talos
+release goes into the labs with the next `mise lock --bump`. The function `talos_version` in
 `lib/lab.sh` reads the version from `talosctl version --client`, and the stages use it for:
 
 - the node image in Docker: `ghcr.io/siderolabs/talos:<version>`,
